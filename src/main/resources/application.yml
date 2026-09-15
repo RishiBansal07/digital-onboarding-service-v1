@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: digital-onboarding-service
+  datasource:
+    url: jdbc:h2:mem:digitalonboardingservice
+    driver-class-name: org.h2.Driver
+    username: admin
+    password: admin
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  h2:
+    console:
+      enabled: true
+
+server:
+  port: 8085
+
+app:
+  db:
+    max-requests-per-second: 2
+  registration:
+    # Comma-separated so it resolves as a single property value.
+    # Add a country by extending this list, e.g. NL,BE,DE
+    allowed-countries: NL,BE
+
+#server:
+#  error:
+#    include-message: always
