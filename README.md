@@ -252,3 +252,4 @@ These are conscious scope decisions for this assignment, not oversights:
 `docs/ARCHITECTURE.md` contains the full request-flow walkthrough, token lifecycle
 diagrams, and a file-by-file responsibility breakdown.
 
+EOF
