@@ -56,7 +56,8 @@ public class OnboardingController {
     }
 
     @GetMapping("/overview")
-    public ResponseEntity<OverviewResponse> overview(@RequestHeader("Authorization") String authorizationHeader) {
+    public ResponseEntity<OverviewResponse> overview(
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
         String token = extractBearerToken(authorizationHeader);
         String username = authenticationService.getUsernameByToken(token);
         OverviewResponse response = accountService.getAccountOverview(username);
@@ -64,7 +65,11 @@ public class OnboardingController {
     }
 
     private String extractBearerToken(String authorizationHeader) {
-        if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER_PREFIX)) {
+        if (authorizationHeader == null || authorizationHeader.isBlank()) {
+            throw new UnauthorizedException("Authorization header is missing");
+        }
+
+        if (!authorizationHeader.startsWith(BEARER_PREFIX)) {
             throw new UnauthorizedException("Authorization header must use Bearer token");
         }
 

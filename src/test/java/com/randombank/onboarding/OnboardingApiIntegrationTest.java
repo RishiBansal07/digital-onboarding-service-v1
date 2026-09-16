@@ -122,6 +122,27 @@ class OnboardingApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
+    @Test
+    void overviewWithoutAuthorizationHeaderIsUnauthorized() throws Exception {
+        mockMvc.perform(get("/overview"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void overviewWithNonBearerAuthorizationHeaderIsUnauthorized() throws Exception {
+        mockMvc.perform(get("/overview").header("Authorization", "Basic dXNlcjpwYXNz"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void overviewWithEmptyBearerTokenIsUnauthorized() throws Exception {
+        mockMvc.perform(get("/overview").header("Authorization", "Bearer "))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
     private String registrationJson(String username, String dateOfBirth, String countryCode) {
         return """
                 {

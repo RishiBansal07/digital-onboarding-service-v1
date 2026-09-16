@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -37,6 +38,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleUnauthorized(UnauthorizedException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(error("UNAUTHORIZED", ex.getMessage(), null));
+    }
+
+    /**
+     * A missing Authorization header is an authentication failure, not a server error.
+     * Without this, Spring's MissingRequestHeaderException would fall through to the
+     * generic handler and be reported as 500.
+     */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(error("UNAUTHORIZED", "Missing required header: " + ex.getHeaderName(), null));
     }
 
     @ExceptionHandler(NotFoundException.class)
