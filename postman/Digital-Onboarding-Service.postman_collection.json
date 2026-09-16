@@ -62,7 +62,9 @@
                   "if (pm.response.code === 201) {",
                   "    const body = pm.response.json();",
                   "    pm.collectionVariables.set('defaultPassword', body.defaultPassword);",
-                  "    console.log('Registered:', body.username, '/', body.defaultPassword);",
+                  "    console.log('✓ Password extracted:', body.defaultPassword);",
+                  "} else {",
+                  "    console.error('✗ Register failed, status:', pm.response.code);",
                   "}"
                 ]
               }
@@ -83,6 +85,19 @@
           "name": "Login",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pwd = pm.collectionVariables.get('defaultPassword');",
+                  "console.log('🔐 Login using password:', pwd, '(for user:', pm.collectionVariables.get('username'), ')');",
+                  "if (!pwd) {",
+                  "    console.error('⚠️  defaultPassword is empty! Did Register run and succeed?');",
+                  "}"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -99,7 +114,9 @@
                   "",
                   "if (pm.response.code === 200) {",
                   "    pm.collectionVariables.set('authToken', pm.response.json().token);",
-                  "    console.log('Token stored.');",
+                  "    console.log('✓ Token stored:', pm.response.json().token);",
+                  "} else {",
+                  "    console.error('✗ Login failed. Response:', pm.response.text());",
                   "}"
                 ]
               }
