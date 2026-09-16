@@ -7,10 +7,10 @@ import com.randombank.onboarding.dto.request.RegisterRequest;
 import com.randombank.onboarding.dto.response.LoginResponse;
 import com.randombank.onboarding.dto.response.OverviewResponse;
 import com.randombank.onboarding.dto.response.RegisterResponse;
-import com.randombank.onboarding.exception.UnauthorizedException;
 import com.randombank.onboarding.service.AccountService;
 import com.randombank.onboarding.service.AuthenticationService;
 import com.randombank.onboarding.service.RegistrationService;
+import com.randombank.onboarding.util.AuthorizationUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -35,7 +35,6 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Onboarding-Controller", description = "Customer onboarding and account management APIs for digital banking")
 public class OnboardingController {
 
-    private static final String BEARER_PREFIX = "Bearer ";
 
     private final RegistrationService registrationService;
     private final AuthenticationService authenticationService;
@@ -101,27 +100,10 @@ public class OnboardingController {
     public ResponseEntity<OverviewResponse> overview(
             @Parameter(hidden = true)
             @RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
-        String token = extractBearerToken(authorizationHeader);
+        String token = AuthorizationUtil.extractBearerToken(authorizationHeader);
         String username = authenticationService.getUsernameByToken(token);
         OverviewResponse response = accountService.getAccountOverview(username);
         return ResponseEntity.ok(response);
-    }
-
-    private String extractBearerToken(String authorizationHeader) {
-        if (authorizationHeader == null || authorizationHeader.isBlank()) {
-            throw new UnauthorizedException("Authorization header is missing");
-        }
-
-        if (!authorizationHeader.startsWith(BEARER_PREFIX)) {
-            throw new UnauthorizedException("Authorization header must use Bearer token");
-        }
-
-        String token = authorizationHeader.substring(BEARER_PREFIX.length()).trim();
-        if (token.isEmpty()) {
-            throw new UnauthorizedException("Bearer token is missing");
-        }
-
-        return token;
     }
 }
 
