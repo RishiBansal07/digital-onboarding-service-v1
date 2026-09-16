@@ -3,7 +3,7 @@
 Backend REST APIs that let customers register and open a bank account remotely,
 without visiting a branch.
 
-Built with Java 25, Spring Boot 3.3.5, Spring Data JPA and H2.
+Built with Java 21, Spring Boot 3.3.5, Spring Data JPA and H2.
 
 ---
 
@@ -26,7 +26,7 @@ Built with Java 25, Spring Boot 3.3.5, Spring Data JPA and H2.
 
 ## Running Locally
 
-Requires JDK 25 and Maven.
+Requires JDK 21 (or newer) and Maven.
 
 ```bash
 mvn spring-boot:run
@@ -37,7 +37,8 @@ The service starts on port **8085**.
 | Resource | URL |
 |---|---|
 | Swagger UI | http://localhost:8085/swagger-ui.html |
-| OpenAPI spec | http://localhost:8085/v3/api-docs |
+| OpenAPI spec (live, JSON) | http://localhost:8085/v3/api-docs |
+| OpenAPI spec (static, YAML) | `docs/api-spec.yml` |
 | H2 console | http://localhost:8085/h2-console |
 
 H2 credentials: JDBC URL `jdbc:h2:mem:digitalonboardingservice`, user `admin`, password `admin`.
@@ -47,6 +48,25 @@ Run the tests:
 ```bash
 mvn test
 ```
+
+---
+
+## API Documentation
+
+The API follows the **OpenAPI 3.0** specification. There are two ways to explore the API:
+
+### Live OpenAPI Spec (Auto-generated)
+- **URL:** `http://localhost:8085/v3/api-docs` (JSON format)
+- **Rendered in Swagger UI:** `http://localhost:8085/swagger-ui.html`
+- **Source:** Auto-generated from `@Operation`, `@ApiResponse` annotations in controller code
+- **Syncs with code:** Changes to annotations are reflected immediately
+- **Best for:** Interactive testing, live exploration
+
+### Static OpenAPI Spec (Documentation)
+- **File:** `docs/api-spec.yml` (YAML format)
+- **Includes:** Business rules, design notes, and comprehensive examples
+- **Use:** Offline documentation, documentation sites, version control history
+- **Sync:** Must be manually updated if API changes (not auto-generated)
 
 ---
 
