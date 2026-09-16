@@ -1,15 +1,19 @@
 package com.randombank.onboarding.service;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 
 import java.math.BigInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@SpringBootTest
 class IbanGeneratorTest {
 
-    private final IbanGenerator ibanGenerator = new IbanGenerator();
+    @Autowired
+    private IbanGenerator ibanGenerator;
 
     @RepeatedTest(50)
     void shouldGenerateValidDutchIban() {
