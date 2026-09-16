@@ -8,6 +8,7 @@ import com.randombank.onboarding.exception.UnauthorizedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,6 +27,22 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(error("VALIDATION_ERROR", "Request validation failed", details));
+    }
+
+    /**
+     * A body Jackson cannot parse - malformed JSON, or a value in the wrong shape
+     * such as "20-05-1990" for a LocalDate - is a client mistake, so it must be 400.
+     *
+     * <p>Without this, the exception reached the generic handler and surfaced as 500
+     * with the raw Jackson message, which leaked internal type names to the caller.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(error("VALIDATION_ERROR",
+                        "Request validation failed",
+                        "Malformed request body. Check field types and formats "
+                                + "(dates must be yyyy-MM-dd)."));
     }
 
     @ExceptionHandler(ConflictException.class)

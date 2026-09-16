@@ -116,6 +116,37 @@ class OnboardingApiIntegrationTest {
     }
 
     @Test
+    void malformedDateOfBirthIsBadRequestNotServerError() throws Exception {
+        String body = """
+                {
+                  "fullName": "Bad Date",
+                  "address": "Damrak 1, Amsterdam",
+                  "username": "bad_date_user",
+                  "dateOfBirth": "20-05-1990",
+                  "countryCode": "NL"
+                }
+                """;
+
+        mockMvc.perform(post("/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void malformedJsonIsBadRequestAndDoesNotLeakInternals() throws Exception {
+        mockMvc.perform(post("/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ not valid json "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                // The raw Jackson message names internal types; it must not be echoed back.
+                .andExpect(jsonPath("$.details").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("java.time"))));
+    }
+
+    @Test
     void overviewWithInvalidTokenIsUnauthorized() throws Exception {
         mockMvc.perform(get("/overview").header("Authorization", "Bearer not-a-real-token"))
                 .andExpect(status().isUnauthorized())

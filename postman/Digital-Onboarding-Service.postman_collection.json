@@ -1,0 +1,1132 @@
+{
+  "info": {
+    "_postman_id": "digital-onboarding-service-v2",
+    "name": "Digital Onboarding Service",
+    "description": "Customer onboarding and remote account opening APIs.\n\nFolders:\n1. Happy Path - full register/login/overview flow\n2. Negative - Registration\n3. Negative - Login\n4. Negative - Authorization\n5. Rate Limiter (legacy DB protection)\n\nIMPORTANT: the service caps traffic at 2 requests/second globally. A collection-level pre-request script paces requests so the functional tests do not trip the limiter. The rate limiter folder deliberately bypasses that pacing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pace requests so functional tests do not trip the 2 req/sec DB limiter.",
+          "// Set pacingEnabled = false to disable.",
+          "const enabled = String(pm.collectionVariables.get('pacingEnabled')) !== 'false';",
+          "if (enabled) {",
+          "    const gapMs = Number(pm.collectionVariables.get('requestGapMs')) || 700;",
+          "    const last = Number(pm.collectionVariables.get('lastRequestAt')) || 0;",
+          "    const wait = Math.max(0, gapMs - (Date.now() - last));",
+          "    if (wait > 0) {",
+          "        setTimeout(function () {}, wait);",
+          "    }",
+          "    pm.collectionVariables.set('lastRequestAt', Date.now() + wait);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Happy Path",
+      "item": [
+        {
+          "name": "Register Customer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('username', 'john_doe_' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response contains username and generated password', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.username).to.eql(pm.collectionVariables.get('username'));",
+                  "    pm.expect(body.defaultPassword).to.be.a('string').and.not.empty;",
+                  "    pm.expect(body.message).to.eql('Registration successful');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('defaultPassword', body.defaultPassword);",
+                  "    console.log('Registered:', body.username, '/', body.defaultPassword);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"John Doe\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"{{username}}\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Registers a customer, opens a current account and returns the generated password."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains a token', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "    pm.expect(body.message).to.eql('Login successful');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('authToken', pm.response.json().token);",
+                  "    console.log('Token stored.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{defaultPassword}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/login", "host": ["{{baseUrl}}"], "path": ["login"] },
+            "description": "Exchanges credentials for an opaque session token."
+          }
+        },
+        {
+          "name": "Get Account Overview",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns a valid Dutch IBAN account', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.accountNumber).to.match(/^NL\\d{2}[A-Z]{4}\\d{10}$/);",
+                  "    pm.expect(body.accountType).to.eql('CURRENT');",
+                  "    pm.expect(Number(body.balance)).to.eql(0);",
+                  "    pm.expect(body.currency).to.eql('EUR');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{authToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "Returns the authenticated customer's account overview."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Negative - Registration",
+      "item": [
+        {
+          "name": "Duplicate Username (409)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Make this test self-contained: ensure the username already exists.",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "const probe = 'duplicate_probe_user';",
+                  "pm.collectionVariables.set('duplicateUser', probe);",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/register',",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: {",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify({",
+                  "            fullName: 'Duplicate Probe',",
+                  "            address: 'Damrak 1, Amsterdam',",
+                  "            username: probe,",
+                  "            dateOfBirth: '1990-05-20',",
+                  "            countryCode: 'NL'",
+                  "        })",
+                  "    }",
+                  "}, function (err, res) {",
+                  "    // 201 on first run, 409 afterwards - both are fine.",
+                  "    console.log('Seed registration status:', err ? 'error' : res.code);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409 Conflict', function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "pm.test('Error code is CONFLICT', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('CONFLICT');",
+                  "    pm.expect(body.message).to.eql('Username already exists');",
+                  "});",
+                  "",
+                  "pm.test('Error payload has the standard shape', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('code', 'message', 'details', 'timestamp');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Duplicate Probe\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"{{duplicateUser}}\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Usernames are unique. Registering an existing username must return 409."
+          }
+        },
+        {
+          "name": "Under 18 (400)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Always exactly 10 years old, regardless of when this runs.",
+                  "const d = new Date();",
+                  "d.setFullYear(d.getFullYear() - 10);",
+                  "pm.collectionVariables.set('underageDob', d.toISOString().split('T')[0]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected for minimum age', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('at least 18 years old');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Too Young\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"too_young_user\",\n  \"dateOfBirth\": \"{{underageDob}}\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Customers must be 18 or older."
+          }
+        },
+        {
+          "name": "Country Not Allowed - DE (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected because country is not allowed', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('Country is not allowed');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Wrong Country\",\n  \"address\": \"Alexanderplatz 1, Berlin\",\n  \"username\": \"wrong_country_user\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"DE\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Only NL and BE are permitted by app.registration.allowed-countries."
+          }
+        },
+        {
+          "name": "Country Wrong Case - nl (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected by uppercase ISO format rule', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('uppercase ISO 3166-1');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Lower Case\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"lowercase_country\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"nl\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Country code must be uppercase ISO 3166-1 alpha-2."
+          }
+        },
+        {
+          "name": "Country Too Long - NLD (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected for length', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('exactly 2 characters');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Long Country\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"long_country\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NLD\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Country code must be exactly 2 characters."
+          }
+        },
+        {
+          "name": "Username Too Short (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected for username length', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('Username must be between 3 and 50');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Short Username\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"ab\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Username must be at least 3 characters."
+          }
+        },
+        {
+          "name": "Username Invalid Characters (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected by username pattern', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('alphanumeric');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Bad Chars\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"john doe!@#\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Only alphanumerics, dots, underscores and hyphens are allowed."
+          }
+        },
+        {
+          "name": "All Fields Missing (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Every required field is reported', function () {",
+                  "    const details = pm.response.json().details;",
+                  "    pm.expect(details).to.include('Full name is required');",
+                  "    pm.expect(details).to.include('Address is required');",
+                  "    pm.expect(details).to.include('Username is required');",
+                  "    pm.expect(details).to.include('Date of birth is required');",
+                  "    pm.expect(details).to.include('Country code is required');",
+                  "});",
+                  "",
+                  "pm.test('Missing country reports required, not not-allowed', function () {",
+                  "    // Validators return true for null so @NotBlank owns the message.",
+                  "    pm.expect(pm.response.json().details).to.not.include('Country is not allowed');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Empty body must report each missing field with an accurate message."
+          }
+        },
+        {
+          "name": "Full Name Too Short (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected for full name length', function () {",
+                  "    pm.expect(pm.response.json().details).to.include('Full name must be between 2 and 100');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"X\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"short_name_user\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Full name must be 2-100 characters."
+          }
+        },
+        {
+          "name": "Address Too Short (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Rejected for address length', function () {",
+                  "    pm.expect(pm.response.json().details).to.include('Address must be between 5 and 200');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Short Address\",\n  \"address\": \"A1\",\n  \"username\": \"short_addr_user\",\n  \"dateOfBirth\": \"1990-05-20\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Address must be 5-200 characters."
+          }
+        },
+        {
+          "name": "Malformed Date Of Birth (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Reported as a validation error, not a server error', function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR');",
+                  "});",
+                  "",
+                  "pm.test('Does not leak internal type names', function () {",
+                  "    const details = pm.response.json().details || '';",
+                  "    pm.expect(details).to.not.include('java.time');",
+                  "    pm.expect(details).to.not.include('Jackson');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Bad Date\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"bad_date_user\",\n  \"dateOfBirth\": \"20-05-1990\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "Date must be ISO-8601 (yyyy-MM-dd)."
+          }
+        },
+        {
+          "name": "Future Date Of Birth (400)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = new Date();",
+                  "d.setFullYear(d.getFullYear() + 1);",
+                  "pm.collectionVariables.set('futureDob', d.toISOString().split('T')[0]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Future birth date fails the age rule', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('at least 18 years old');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Future Person\",\n  \"address\": \"Damrak 1, Amsterdam\",\n  \"username\": \"future_dob_user\",\n  \"dateOfBirth\": \"{{futureDob}}\",\n  \"countryCode\": \"NL\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/register", "host": ["{{baseUrl}}"], "path": ["register"] },
+            "description": "A date of birth in the future can never satisfy the minimum age."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Negative - Login",
+      "item": [
+        {
+          "name": "Wrong Password (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Generic credentials message (no user enumeration)', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('UNAUTHORIZED');",
+                  "    pm.expect(body.message).to.eql('Invalid username or password');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    pm.collectionVariables.set('wrongPasswordMessage', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"definitely-not-the-password\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/login", "host": ["{{baseUrl}}"], "path": ["login"] },
+            "description": "Run the Happy Path first so {{username}} exists."
+          }
+        },
+        {
+          "name": "Unknown Username (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Message is identical to the wrong-password case', function () {",
+                  "    const message = pm.response.json().message;",
+                  "    pm.expect(message).to.eql('Invalid username or password');",
+                  "",
+                  "    const previous = pm.collectionVariables.get('wrongPasswordMessage');",
+                  "    if (previous) {",
+                  "        // Identical messages prevent username enumeration.",
+                  "        pm.expect(message).to.eql(previous);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"no_such_user_at_all\",\n  \"password\": \"any-password\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/login", "host": ["{{baseUrl}}"], "path": ["login"] },
+            "description": "Unknown user and wrong password must be indistinguishable."
+          }
+        },
+        {
+          "name": "Missing Password (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Reports the missing password', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('VALIDATION_ERROR');",
+                  "    pm.expect(body.details).to.include('Password is required');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/login", "host": ["{{baseUrl}}"], "path": ["login"] },
+            "description": "Missing credentials are a validation error, not an auth failure."
+          }
+        },
+        {
+          "name": "Blank Username (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Reports the missing username', function () {",
+                  "    pm.expect(pm.response.json().details).to.include('Username is required');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"   \",\n  \"password\": \"some-password\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/login", "host": ["{{baseUrl}}"], "path": ["login"] },
+            "description": "Blank usernames are rejected by @NotBlank."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Negative - Authorization",
+      "item": [
+        {
+          "name": "No Authorization Header (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401, not 500', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Reports a missing header', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('UNAUTHORIZED');",
+                  "    pm.expect(body.message).to.eql('Authorization header is missing');",
+                  "});",
+                  "",
+                  "pm.test('Does not leak an internal error', function () {",
+                  "    pm.expect(pm.response.json().code).to.not.eql('INTERNAL_ERROR');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "A missing credential is an auth failure (401), never a server error (500)."
+          }
+        },
+        {
+          "name": "Non-Bearer Scheme (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Requires the Bearer scheme', function () {",
+                  "    pm.expect(pm.response.json().message).to.eql('Authorization header must use Bearer token');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Basic dXNlcjpwYXNz" }],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "Basic auth is not accepted."
+          }
+        },
+        {
+          "name": "Raw Token Without Bearer Prefix (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Requires the Bearer prefix', function () {",
+                  "    pm.expect(pm.response.json().message).to.eql('Authorization header must use Bearer token');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "{{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "A valid token still fails without the 'Bearer ' prefix. This is the mistake that looks like a missing header in Swagger UI."
+          }
+        },
+        {
+          "name": "Empty Bearer Token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Rejected because there is no usable token', function () {",
+                  "    // Most HTTP clients trim trailing whitespace in header values, so",
+                  "    // 'Bearer    ' can arrive as either 'Bearer ' or 'Bearer'. Both are",
+                  "    // rejected, just by different branches, so accept either message.",
+                  "    const message = pm.response.json().message;",
+                  "    pm.expect(message).to.be.oneOf([",
+                  "        'Bearer token is missing',",
+                  "        'Authorization header must use Bearer token'",
+                  "    ]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer    " }],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "The Bearer prefix with no token is rejected."
+          }
+        },
+        {
+          "name": "Unknown Token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Reports an invalid token', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('UNAUTHORIZED');",
+                  "    pm.expect(body.message).to.eql('Invalid or expired token');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer 00000000-0000-0000-0000-000000000000" }
+            ],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "A well-formed but unknown token is rejected."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Rate Limiter",
+      "description": "The legacy DB is protected by a global 2 req/sec limit enforced in ApiRateLimitFilter. These requests deliberately burst past the limit using pm.sendRequest, which bypasses the collection-level pacing script.",
+      "item": [
+        {
+          "name": "Burst Test - expect 429",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fire a rapid burst at /overview and record every status code.",
+                  "// Requests are sequential but fast on localhost, so they land in the",
+                  "// same one-second window and trip the limiter.",
+                  "//",
+                  "// An invalid token is used on purpose: the filter runs BEFORE the",
+                  "// controller, so allowed requests return 401 and throttled ones 429.",
+                  "// That difference is exactly what we assert on.",
+                  "",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "const burstSize = Number(pm.collectionVariables.get('rateLimitBurstSize')) || 8;",
+                  "const statuses = [];",
+                  "",
+                  "function fire(i, done) {",
+                  "    if (i >= burstSize) { return done(); }",
+                  "    pm.sendRequest({",
+                  "        url: baseUrl + '/overview',",
+                  "        method: 'GET',",
+                  "        header: { 'Authorization': 'Bearer rate-limit-probe' }",
+                  "    }, function (err, res) {",
+                  "        statuses.push(err ? 0 : res.code);",
+                  "        fire(i + 1, done);",
+                  "    });",
+                  "}",
+                  "",
+                  "fire(0, function () {",
+                  "    pm.collectionVariables.set('burstStatuses', JSON.stringify(statuses));",
+                  "    console.log('Burst statuses:', statuses.join(', '));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const statuses = JSON.parse(pm.collectionVariables.get('burstStatuses') || '[]');",
+                  "const throttled = statuses.filter(function (s) { return s === 429; });",
+                  "const allowed = statuses.filter(function (s) { return s !== 429 && s !== 0; });",
+                  "const maxPerSecond = Number(pm.collectionVariables.get('maxRequestsPerSecond')) || 2;",
+                  "",
+                  "console.log('Statuses:', statuses.join(', '));",
+                  "console.log('Allowed:', allowed.length, '| Throttled:', throttled.length);",
+                  "",
+                  "pm.test('Burst actually executed', function () {",
+                  "    pm.expect(statuses.length).to.be.above(0);",
+                  "});",
+                  "",
+                  "pm.test('Limiter rejected at least one request with 429', function () {",
+                  "    pm.expect(throttled.length).to.be.above(0);",
+                  "});",
+                  "",
+                  "pm.test('Some requests were allowed through', function () {",
+                  "    pm.expect(allowed.length).to.be.above(0);",
+                  "});",
+                  "",
+                  "pm.test('Allowed count respects the configured budget', function () {",
+                  "    // The burst can straddle a window boundary, so allow a small margin.",
+                  "    pm.expect(allowed.length).to.be.at.most(maxPerSecond * 2);",
+                  "});",
+                  "",
+                  "pm.test('Throttled response uses the documented error shape', function () {",
+                  "    pm.response.to.have.status(429);",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('TOO_MANY_REQUESTS');",
+                  "    pm.expect(body.message).to.include('Rate limit exceeded');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer rate-limit-probe" }],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "The pre-request script exhausts the per-second budget, so this request itself is throttled with 429."
+          }
+        },
+        {
+          "name": "Recovery After One Second - expect not 429",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The limiter resets every second. Wait past the window used by the",
+                  "// burst test so this request finds a fresh budget.",
+                  "setTimeout(function () {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Limiter recovered - not throttled', function () {",
+                  "    pm.expect(pm.response.code).to.not.eql(429);",
+                  "});",
+                  "",
+                  "pm.test('Request reached the controller (401 for the fake token)', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().code).to.eql('UNAUTHORIZED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer rate-limit-probe" }],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "Proves the limiter is a per-second window, not a permanent block."
+          }
+        },
+        {
+          "name": "Limiter Is Global - Register Burst",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Same burst, but against /register, to show the limit is global",
+                  "// across protected endpoints rather than per-endpoint.",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "const burstSize = Number(pm.collectionVariables.get('rateLimitBurstSize')) || 8;",
+                  "const statuses = [];",
+                  "const stamp = Date.now();",
+                  "",
+                  "function body(i) {",
+                  "    return JSON.stringify({",
+                  "        fullName: 'Burst User',",
+                  "        address: 'Damrak 1, Amsterdam',",
+                  "        username: 'burst_' + stamp + '_' + i,",
+                  "        dateOfBirth: '1990-05-20',",
+                  "        countryCode: 'NL'",
+                  "    });",
+                  "}",
+                  "",
+                  "function fire(i, done) {",
+                  "    if (i >= burstSize) { return done(); }",
+                  "    pm.sendRequest({",
+                  "        url: baseUrl + '/register',",
+                  "        method: 'POST',",
+                  "        header: { 'Content-Type': 'application/json' },",
+                  "        body: { mode: 'raw', raw: body(i) }",
+                  "    }, function (err, res) {",
+                  "        statuses.push(err ? 0 : res.code);",
+                  "        fire(i + 1, done);",
+                  "    });",
+                  "}",
+                  "",
+                  "fire(0, function () {",
+                  "    pm.collectionVariables.set('registerBurstStatuses', JSON.stringify(statuses));",
+                  "    console.log('Register burst statuses:', statuses.join(', '));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const statuses = JSON.parse(pm.collectionVariables.get('registerBurstStatuses') || '[]');",
+                  "const throttled = statuses.filter(function (s) { return s === 429; });",
+                  "const created = statuses.filter(function (s) { return s === 201; });",
+                  "",
+                  "console.log('Register burst:', statuses.join(', '));",
+                  "console.log('Created:', created.length, '| Throttled:', throttled.length);",
+                  "",
+                  "pm.test('Registration is rate limited as well', function () {",
+                  "    pm.expect(throttled.length).to.be.above(0);",
+                  "});",
+                  "",
+                  "pm.test('Throttled registrations never created a customer', function () {",
+                  "    pm.expect(created.length).to.be.below(statuses.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer rate-limit-probe" }],
+            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
+            "description": "Shows the budget is shared across /register, /login and /overview."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8085", "type": "string" },
+    { "key": "authToken", "value": "", "type": "string" },
+    { "key": "username", "value": "", "type": "string" },
+    { "key": "defaultPassword", "value": "", "type": "string" },
+    { "key": "duplicateUser", "value": "", "type": "string" },
+    { "key": "underageDob", "value": "", "type": "string" },
+    { "key": "futureDob", "value": "", "type": "string" },
+    { "key": "wrongPasswordMessage", "value": "", "type": "string" },
+    { "key": "burstStatuses", "value": "", "type": "string" },
+    { "key": "registerBurstStatuses", "value": "", "type": "string" },
+    { "key": "lastRequestAt", "value": "0", "type": "string" },
+    { "key": "requestGapMs", "value": "700", "type": "string" },
+    { "key": "pacingEnabled", "value": "true", "type": "string" },
+    { "key": "rateLimitBurstSize", "value": "8", "type": "string" },
+    { "key": "maxRequestsPerSecond", "value": "2", "type": "string" }
+  ]
+}
+
