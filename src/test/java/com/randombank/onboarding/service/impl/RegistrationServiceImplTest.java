@@ -223,7 +223,7 @@ class RegistrationServiceImplTest {
 
         verify(accountRepository).save(argThat(account ->
                 account.getCurrency().equals("EUR") &&
-                account.getBalance().equals(BigDecimal.ZERO) &&
+                account.getBalance().compareTo(BigDecimal.ZERO) == 0 &&
                 account.getAccountType() == AccountType.CURRENT
         ));
     }

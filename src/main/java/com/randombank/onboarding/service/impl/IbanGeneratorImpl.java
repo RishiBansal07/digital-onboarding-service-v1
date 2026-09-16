@@ -3,6 +3,9 @@ package com.randombank.onboarding.service.impl;
 import com.randombank.onboarding.service.IbanGenerator;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
+import java.util.random.RandomGenerator;
+
 /**
  * Implementation of IbanGenerator.
  * Generates Dutch IBAN (NL format) according to IBAN standard.
@@ -12,7 +15,11 @@ class IbanGeneratorImpl implements IbanGenerator {
 
     private static final String COUNTRY_CODE = "NL";
     private static final String BANK_CODE = "RABO";
-    private static final int ACCOUNT_NUMBER_LENGTH = 10;
+
+    private static final long MIN_ACCOUNT_NUMBER = 1_000_000_000L;
+    private static final long MAX_ACCOUNT_NUMBER = 9_999_999_999L;
+
+    private final RandomGenerator random = new SecureRandom();
 
     @Override
     public String generateIban() {
@@ -31,7 +38,7 @@ class IbanGeneratorImpl implements IbanGenerator {
 
     private long generateRandomAccountNumber() {
         // Generate random 10-digit number (1000000000 to 9999999999)
-        return 1000000000L + (long) (Math.random() * 9000000000L);
+        return random.nextLong(MIN_ACCOUNT_NUMBER, MAX_ACCOUNT_NUMBER + 1);
     }
 
     private int calculateCheckDigits(String ibanWithoutCheckDigits) {
