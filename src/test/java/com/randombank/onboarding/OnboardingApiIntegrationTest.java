@@ -37,7 +37,7 @@ class OnboardingApiIntegrationTest {
         String registerBody = mockMvc.perform(post("/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationJson(username, "1990-05-20", "NL")))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.username").value(username))
                 .andExpect(jsonPath("$.defaultPassword").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
@@ -70,7 +70,7 @@ class OnboardingApiIntegrationTest {
         mockMvc.perform(post("/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationJson(username, "1990-05-20", "NL")))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         mockMvc.perform(post("/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -104,7 +104,7 @@ class OnboardingApiIntegrationTest {
         mockMvc.perform(post("/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationJson(username, "1990-05-20", "NL")))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         mockMvc.perform(post("/login")
                         .contentType(MediaType.APPLICATION_JSON)
