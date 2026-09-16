@@ -21,6 +21,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+@Slf4j
 @RestController
 @RequiredArgsConstructor
 @Tag(name = "Onboarding-Controller", description = "Customer onboarding and account management APIs for digital banking")
@@ -53,6 +55,7 @@ public class OnboardingController {
     })
     public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
         Customer customer = registrationService.registerCustomer(request);
+        log.info("Customer registered: username={}, country={}", customer.getUsername(), request.countryCode());
 
         RegisterResponse response = new RegisterResponse(
                 customer.getUsername(),
@@ -75,6 +78,7 @@ public class OnboardingController {
     })
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         String token = authenticationService.login(request.username(), request.password());
+        log.info("User logged in: username={}", request.username());
 
         LoginResponse response = new LoginResponse(
                 request.username(),
@@ -103,6 +107,7 @@ public class OnboardingController {
         String token = AuthorizationUtil.extractBearerToken(authorizationHeader);
         String username = authenticationService.getUsernameByToken(token);
         OverviewResponse response = accountService.getAccountOverview(username);
+        log.info("Account overview retrieved: username={}, iban={}", username, response.accountNumber());
         return ResponseEntity.ok(response);
     }
 }

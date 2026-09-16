@@ -1,0 +1,408 @@
+openapi: 3.0.0
+info:
+  title: Digital Onboarding Service API
+  description: Backend REST APIs that let customers register and open a bank account remotely, without visiting a branch.
+  version: 1.0.0
+  contact:
+    name: Random Bank Development Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8085
+    description: Local Development Server
+  - url: https://api.randombank.com
+    description: Production Server
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Onboarding-Controller
+    description: Customer onboarding and account management APIs for digital banking
+
+paths:
+  /register:
+    post:
+      tags:
+        - Onboarding-Controller
+      summary: Register a new customer
+      description: |
+        Register a new customer with personal information. 
+        Auto-generates a Dutch IBAN and default password.
+        
+        **Business Rules:**
+        - Username must be unique
+        - Customer must be at least 18 years old
+        - Only Netherlands (NL) and Belgium (BE) are allowed
+        - Rate limited to 2 requests per second globally
+      operationId: registerCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              success:
+                summary: Valid registration
+                value:
+                  fullName: John Doe
+                  address: Damrak 1, Amsterdam
+                  username: john_doe
+                  dateOfBirth: "1990-05-20"
+                  countryCode: NL
+      responses:
+        '201':
+          description: Customer registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+              examples:
+                success:
+                  summary: Registration successful
+                  value:
+                    username: john_doe
+                    defaultPassword: a1b2c3d4e5f6
+                    message: Registration successful
+        '400':
+          description: Validation failed (invalid age, country not allowed, malformed input)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                underage:
+                  summary: Customer under 18
+                  value:
+                    code: VALIDATION_ERROR
+                    message: "Customer must be at least 18 years old"
+                    details: null
+                    timestamp: 1758000000000
+                invalidCountry:
+                  summary: Country not allowed
+                  value:
+                    code: VALIDATION_ERROR
+                    message: "Country code 'US' is not allowed. Allowed countries: NL, BE"
+                    details: null
+                    timestamp: 1758000000000
+        '409':
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: CONFLICT
+                message: "Username already exists"
+                details: null
+                timestamp: 1758000000000
+        '429':
+          description: Rate limit exceeded (max 2 requests per second)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: TOO_MANY_REQUESTS
+                message: "Too many requests. Maximum 2 requests per second allowed."
+                details: null
+                timestamp: 1758000000000
+
+  /login:
+    post:
+      tags:
+        - Onboarding-Controller
+      summary: Authenticate and obtain session token
+      description: |
+        Log in with username and password. Returns a session token for use in protected endpoints.
+        
+        **Security Notes:**
+        - Returns same error message for unknown username and wrong password (no username enumeration)
+        - Token is valid for the current session (no expiration)
+        - Token is opaque and verified via in-memory session store
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: john_doe
+              password: a1b2c3d4e5f6
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                username: john_doe
+                token: 5f8a3c21-9b4e-4d17-8c33-1e6a7b2d9f04
+                message: Login successful
+        '401':
+          description: Invalid username or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: UNAUTHORIZED
+                message: "Invalid username or password"
+                details: null
+                timestamp: 1758000000000
+        '429':
+          description: Rate limit exceeded (max 2 requests per second)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /overview:
+    get:
+      tags:
+        - Onboarding-Controller
+      summary: Retrieve account overview
+      description: |
+        Get the authenticated customer's account details including IBAN, account type, balance, and currency.
+        
+        **Requires authentication:** Bearer token from /login endpoint
+      operationId: getAccountOverview
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Authorization
+          in: header
+          description: Bearer token obtained from /login
+          required: true
+          schema:
+            type: string
+            pattern: "^Bearer [a-f0-9-]{36}$"
+          example: "Bearer 5f8a3c21-9b4e-4d17-8c33-1e6a7b2d9f04"
+      responses:
+        '200':
+          description: Account overview retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverviewResponse'
+              example:
+                accountNumber: NL91RABO0417164300
+                accountType: CURRENT
+                balance: 0.00
+                currency: EUR
+        '401':
+          description: Missing or invalid authorization token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingHeader:
+                  summary: Authorization header missing
+                  value:
+                    code: UNAUTHORIZED
+                    message: "Authorization header is missing"
+                    details: null
+                    timestamp: 1758000000000
+                invalidToken:
+                  summary: Invalid token
+                  value:
+                    code: UNAUTHORIZED
+                    message: "Invalid or expired token"
+                    details: null
+                    timestamp: 1758000000000
+        '404':
+          description: Account not found for the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: NOT_FOUND
+                message: "Account not found"
+                details: null
+                timestamp: 1758000000000
+        '429':
+          description: Rate limit exceeded (max 2 requests per second)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: UUID
+      description: JWT-style Bearer token obtained from the /login endpoint
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - fullName
+        - address
+        - username
+        - dateOfBirth
+        - countryCode
+      properties:
+        fullName:
+          type: string
+          description: Full name of the customer
+          example: John Doe
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          description: Residential address
+          example: Damrak 1, Amsterdam
+          minLength: 1
+          maxLength: 255
+        username:
+          type: string
+          description: Unique username for login
+          example: john_doe
+          minLength: 3
+          maxLength: 50
+          pattern: "^[a-zA-Z0-9_-]+$"
+        dateOfBirth:
+          type: string
+          format: date
+          description: Date of birth (YYYY-MM-DD). Customer must be at least 18 years old.
+          example: "1990-05-20"
+        countryCode:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: NL
+          enum:
+            - NL
+            - BE
+
+    RegisterResponse:
+      type: object
+      required:
+        - username
+        - defaultPassword
+        - message
+      properties:
+        username:
+          type: string
+          description: The registered username
+          example: john_doe
+        defaultPassword:
+          type: string
+          description: Auto-generated default password (user should change on first login)
+          example: a1b2c3d4e5f6
+        message:
+          type: string
+          description: Confirmation message
+          example: Registration successful
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: Username
+          example: john_doe
+        password:
+          type: string
+          description: Password
+          example: a1b2c3d4e5f6
+          format: password
+
+    LoginResponse:
+      type: object
+      required:
+        - username
+        - token
+        - message
+      properties:
+        username:
+          type: string
+          description: The authenticated username
+          example: john_doe
+        token:
+          type: string
+          format: uuid
+          description: Opaque session token for authenticated requests
+          example: 5f8a3c21-9b4e-4d17-8c33-1e6a7b2d9f04
+        message:
+          type: string
+          description: Confirmation message
+          example: Login successful
+
+    OverviewResponse:
+      type: object
+      required:
+        - accountNumber
+        - accountType
+        - balance
+        - currency
+      properties:
+        accountNumber:
+          type: string
+          description: Full IBAN (Dutch format for NL customers)
+          example: NL91RABO0417164300
+          pattern: "^NL\\d{2}[A-Z]{4}\\d{10}$"
+        accountType:
+          type: string
+          description: Type of account
+          example: CURRENT
+          enum:
+            - CURRENT
+            - SAVINGS
+        balance:
+          type: number
+          format: double
+          description: Current account balance in EUR
+          example: 0.00
+          minimum: 0
+        currency:
+          type: string
+          description: Currency code (ISO 4217)
+          example: EUR
+          enum:
+            - EUR
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+        - timestamp
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: VALIDATION_ERROR
+          enum:
+            - VALIDATION_ERROR
+            - UNAUTHORIZED
+            - CONFLICT
+            - NOT_FOUND
+            - TOO_MANY_REQUESTS
+            - INTERNAL_ERROR
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Username already exists"
+        details:
+          type: object
+          nullable: true
+          description: Additional error details (may be null)
+          example: null
+        timestamp:
+          type: integer
+          format: int64
+          description: Unix timestamp (milliseconds) when the error occurred
+          example: 1758000000000
+

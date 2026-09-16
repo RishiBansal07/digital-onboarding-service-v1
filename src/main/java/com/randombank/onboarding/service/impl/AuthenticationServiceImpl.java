@@ -6,10 +6,12 @@ import com.randombank.onboarding.repository.CustomerRepository;
 import com.randombank.onboarding.service.AuthenticationService;
 import com.randombank.onboarding.service.SessionService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 class AuthenticationServiceImpl implements AuthenticationService {
@@ -28,11 +30,13 @@ class AuthenticationServiceImpl implements AuthenticationService {
         Optional<Customer> customer = customerRepository.findByUsername(username);
 
         if (customer.isEmpty()) {
+            log.debug("Login attempt with unknown username: {}", username);
             throw new UnauthorizedException(INVALID_CREDENTIALS);
         }
 
         // Plain comparison: password encryption is out of scope per the assignment.
         if (!customer.get().getPassword().equals(password)) {
+            log.debug("Login attempt with incorrect password: {}", username);
             throw new UnauthorizedException(INVALID_CREDENTIALS);
         }
 

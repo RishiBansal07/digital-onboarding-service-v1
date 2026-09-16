@@ -1,0 +1,7 @@
+services:
+  onboarding:
+    build: .
+    ports:
+      - "127.0.0.1:8085:8085"
+    environment:
+      SPRING_H2_CONSOLE_ENABLED: "false"

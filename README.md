@@ -20,7 +20,7 @@ Built with Java 21, Spring Boot 3.3.5, Spring Data JPA and H2.
 | Only Netherlands and Belgium allowed | `@AllowedCountry` + `app.registration.allowed-countries` |
 | Easy to add new countries | Config list in `application.yml` — no code change |
 | 18+ only | `@MinimumAge(18)` |
-| Do not overload the legacy DB (max 2 req/sec) | `ApiRateLimitFilter` |
+| Limit API traffic to reduce DB load | `ApiRateLimitFilter`; strict DB throughput control remains a future enhancement |
 
 ---
 
@@ -48,6 +48,26 @@ Run the tests:
 ```bash
 mvn test
 ```
+
+---
+
+## Running with Docker
+
+Requires Docker with Linux containers (Docker Desktop on Windows). From the directory
+containing `compose.yaml`, run:
+
+```bash
+docker compose up --build -d
+docker compose logs -f
+```
+
+Open http://localhost:8085/swagger-ui.html. Stop with `docker compose down`.
+If port 8085 is occupied, stop the local application or change the host port in
+`compose.yaml`. Java and Maven are included in the build image.
+
+The image build skips tests because the current rate-limit test is timing-dependent;
+run `mvn test` separately. H2 data and sessions are lost when the container stops.
+The H2 console is disabled in the container, and the port is exposed only on localhost.
 
 ---
 
@@ -130,7 +150,7 @@ curl http://localhost:8085/overview \
 
 ## Error Responses
 
-All errors share one shape:
+Controller errors use the following shape. The filter's `429` response currently includes only `code` and `message`.
 
 ```json
 {
@@ -157,11 +177,9 @@ All errors share one shape:
 ```yaml
 app:
   db:
-    max-requests-per-second: 2      # legacy DB protection
+    max-requests-per-second: 2      # API request limit, not SQL throughput
   registration:
-    allowed-countries:              # add a country by adding a line
-      - NL
-      - BE
+    allowed-countries: NL,BE        # extend this comma-separated list
 ```
 
 Adding a new country is a one-line config change and requires no redeployment of code logic.
@@ -172,8 +190,9 @@ Adding a new country is a one-line config change and requires no redeployment of
 
 ### Protecting the legacy database
 
-The database cannot handle more than 2 requests per second. This is enforced by
-`ApiRateLimitFilter`, a servlet filter that runs **before** Spring MVC.
+`ApiRateLimitFilter` runs **before** Spring MVC and allows two API requests per
+calendar second per instance. A request can execute several SQL statements, so this
+does not yet enforce the database's two-requests-per-second limit.
 
 Placing the limit in a filter rather than in the service layer means a rejected request
 never reaches the controller, never opens a transaction, and never acquires a database
@@ -184,17 +203,16 @@ being modelled is the database's total throughput, not fairness between clients 
 per-user limit would still allow 10 users × 2 req/sec = 20 req/sec to reach the database.
 
 Registration is additionally wrapped in a single `@Transactional` unit so that the
-customer and account rows are written together, in one round trip boundary.
+customer and account rows commit or roll back together. This still requires multiple
+database round trips.
 
 ### Why there is no response cache
 
 Caching `/overview` was considered and deliberately rejected.
 
 Balance is mutable data. A cache without a TTL and without eviction on write would serve
-a stale balance indefinitely, which is unacceptable for a banking API. Adding TTL plus
-eviction would introduce moving parts that the requirement does not call for: the rate
-limiter already guarantees a hard ceiling on database load, which is what the requirement
-actually asks for.
+a stale balance indefinitely. Any future cache should have a TTL and eviction on
+balance changes. Caching can reduce reads, but database throughput control is still needed.
 
 Caching becomes worthwhile once balance-mutating endpoints exist (deposits, transfers).
 At that point the right approach is a short TTL as a safety net **combined with**
@@ -248,14 +266,15 @@ country reports "Country code is required" rather than "Country is not allowed".
 
 `IbanGenerator` produces a structurally valid Dutch IBAN including correctly computed
 MOD-97 check digits, rather than a random string. `IbanGeneratorTest` independently
-verifies the checksum across repeated runs. Generation retries on the (vanishingly
-unlikely) event of a collision against the unique index on `accounts.iban`.
+verifies the checksum across repeated runs. Generation retries when a pre-insert check
+finds an existing IBAN. The unique index prevents duplicates, but concurrent collisions
+still need transaction-level retry handling.
 
 ---
 
 ## Known Limitations
 
-These are conscious scope decisions for this assignment, not oversights:
+Current scope limitations:
 
 - Passwords are stored in plain text — the assignment explicitly waives encryption.
 - Tokens do not expire and there is no logout endpoint.
@@ -267,9 +286,22 @@ These are conscious scope decisions for this assignment, not oversights:
 
 ---
 
+## Future Enhancements
+
+The following gaps remain open; documenting them does not resolve them.
+
+| Area | Problem and proposed solution |
+|---|---|
+| Database throughput | API limits allow multiple SQL calls and bursts across second boundaries. Pace database operations to enforce two requests per second, with a shared budget when scaling out. |
+| Concurrent registration | Simultaneous requests can pass uniqueness checks and return 500. Map username constraint violations to 409 and retry IBAN collisions in a fresh transaction. |
+| Reliable tests | The rate-limit test depends on wall-clock timing. Inject a controllable clock; add SQL throughput, concurrency, rollback, Belgium, and exact-age-18 coverage. |
+| API contract | OpenAPI authentication, validation limits, and error schemas differ from the implementation. Align both specifications and standardize all error responses, including 429. |
+| Error privacy | Unexpected errors expose internal exception messages. Log details server-side and return a generic message to clients. |
+| Documentation and delivery | Postman pacing instructions are outdated. Align instructions with the collection and commit all required artifacts before submission. |
+
+---
+
 ## Further Reading
 
 `docs/ARCHITECTURE.md` contains the full request-flow walkthrough, token lifecycle
 diagrams, and a file-by-file responsibility breakdown.
-
-EOF

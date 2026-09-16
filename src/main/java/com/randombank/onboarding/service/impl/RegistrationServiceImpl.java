@@ -12,11 +12,13 @@ import com.randombank.onboarding.service.IbanGenerator;
 import com.randombank.onboarding.service.PasswordGenerator;
 import com.randombank.onboarding.service.RegistrationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 class RegistrationServiceImpl implements RegistrationService {
@@ -32,6 +34,7 @@ class RegistrationServiceImpl implements RegistrationService {
     @Transactional
     public Customer registerCustomer(RegisterRequest request) {
         if (customerRepository.existsByUsername(request.username())) {
+            log.warn("Duplicate username attempt: username={}", request.username());
             throw new ConflictException("Username already exists");
         }
 
@@ -72,6 +75,7 @@ class RegistrationServiceImpl implements RegistrationService {
             if (!accountRepository.existsByIban(iban)) {
                 return iban;
             }
+            log.warn("IBAN collision detected, retrying: attempt={}", attempt + 1);
         }
 
         throw new BadRequestException(

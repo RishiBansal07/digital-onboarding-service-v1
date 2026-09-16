@@ -1,4 +1,4 @@
-package com.randombank.onboarding;
+package com.randombank.onboarding.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

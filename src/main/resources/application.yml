@@ -20,6 +20,13 @@ spring:
 server:
   port: 8085
 
+logging:
+  level:
+    root: INFO
+    com.randombank.onboarding: INFO
+    org.springframework.web: WARN
+  pattern: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
 app:
   db:
     max-requests-per-second: 2
