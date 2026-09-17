@@ -27,6 +27,11 @@ spring:
 server:
   port: 8085
 
+springdoc:
+  api-docs:
+    # Preserve the existing API document format across the Springdoc upgrade.
+    version: OPENAPI_3_0
+
 logging:
   level:
     root: INFO

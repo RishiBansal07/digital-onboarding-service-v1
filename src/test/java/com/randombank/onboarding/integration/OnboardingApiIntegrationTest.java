@@ -1,10 +1,10 @@
 package com.randombank.onboarding.integration;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -31,6 +31,40 @@ class OnboardingApiIntegrationTest {
     private ObjectMapper objectMapper;
 
     @Test
+    void openApiIncludesEndpointsAndBearerAuthentication() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openapi").value(org.hamcrest.Matchers.startsWith("3.0.")))
+                .andExpect(jsonPath("$.paths['/register'].post").exists())
+                .andExpect(jsonPath("$.paths['/login'].post").exists())
+                .andExpect(jsonPath("$.paths['/overview'].get.security[0].bearerAuth").isArray())
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"));
+    }
+
+    @Test
+    void swaggerUiIsServed() throws Exception {
+        mockMvc.perform(get("/swagger-ui/index.html"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void unknownJsonFieldsRemainIgnored() throws Exception {
+        String request = registrationJson("extra_field_user", "1990-05-20", "BE")
+                .replace("\"countryCode\": \"BE\"", "\"countryCode\": \"BE\", \"extraField\": true");
+        mockMvc.perform(post("/register").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.username").value("extra_field_user"));
+    }
+
+    @Test
+    void missingRequiredFieldsRemainValidationErrors() throws Exception {
+        mockMvc.perform(post("/register").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").value("Request validation failed"));
+    }
+
+    @Test
     void registerThenLoginThenViewOverview() throws Exception {
         String username = "happy_path_user";
 
@@ -42,7 +76,7 @@ class OnboardingApiIntegrationTest {
                 .andExpect(jsonPath("$.defaultPassword").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
 
-        String password = json(registerBody).get("defaultPassword").asText();
+        String password = json(registerBody).get("defaultPassword").asString();
 
         String loginBody = mockMvc.perform(post("/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -53,7 +87,7 @@ class OnboardingApiIntegrationTest {
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
 
-        String token = json(loginBody).get("token").asText();
+        String token = json(loginBody).get("token").asString();
 
         mockMvc.perform(get("/overview").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -190,4 +224,3 @@ class OnboardingApiIntegrationTest {
         return objectMapper.readTree(body);
     }
 }
-

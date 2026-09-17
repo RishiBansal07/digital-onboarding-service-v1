@@ -2,7 +2,8 @@ FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY pom.xml .
 COPY src ./src
-RUN mvn -B -ntp package
+# Cache dependencies across builds and verify tests before producing the image.
+RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp verify
 
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
