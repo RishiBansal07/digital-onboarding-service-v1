@@ -81,6 +81,12 @@ The API follows the **OpenAPI 3.0** specification. There are two ways to explore
 - **Syncs with code:** Changes to annotations are reflected immediately
 - **Best for:** Interactive testing, live exploration
 
+Swagger's **Authorize** button uses the OpenAPI HTTP Bearer scheme. Paste the token
+returned by `/login` (without `Bearer `); Swagger sends it as
+`Authorization: Bearer <token>`. Only `/overview` requires authentication;
+`/register` and `/login` are public. The explicit header parameter is hidden in Swagger
+because the Bearer scheme attaches it reliably.
+
 ### Static OpenAPI Spec (Documentation)
 - **File:** `docs/api-spec.yml` (YAML format)
 - **Includes:** Business rules, design notes, and comprehensive examples
