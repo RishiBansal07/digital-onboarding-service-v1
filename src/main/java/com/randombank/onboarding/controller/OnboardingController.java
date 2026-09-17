@@ -50,8 +50,7 @@ public class OnboardingController {
             @ApiResponse(responseCode = "201", description = "Customer registered successfully",
                     content = @Content(mediaType = "application/json", schema = @Schema(implementation = RegisterResponse.class))),
             @ApiResponse(responseCode = "400", description = "Validation failed (invalid age, country not allowed, etc.)"),
-            @ApiResponse(responseCode = "409", description = "Username already exists"),
-            @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+            @ApiResponse(responseCode = "409", description = "Username already exists")
     })
     public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
         Customer customer = registrationService.registerCustomer(request);
@@ -73,8 +72,7 @@ public class OnboardingController {
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Login successful",
                     content = @Content(mediaType = "application/json", schema = @Schema(implementation = LoginResponse.class))),
-            @ApiResponse(responseCode = "401", description = "Invalid username or password"),
-            @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+            @ApiResponse(responseCode = "401", description = "Invalid username or password")
     })
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         String token = authenticationService.login(request.username(), request.password());
@@ -98,8 +96,7 @@ public class OnboardingController {
             @ApiResponse(responseCode = "200", description = "Account overview retrieved successfully",
                     content = @Content(mediaType = "application/json", schema = @Schema(implementation = OverviewResponse.class))),
             @ApiResponse(responseCode = "401", description = "Missing or invalid authorization token"),
-            @ApiResponse(responseCode = "404", description = "Account not found for the authenticated user"),
-            @ApiResponse(responseCode = "429", description = "Rate limit exceeded")
+            @ApiResponse(responseCode = "404", description = "Account not found for the authenticated user")
     })
     public ResponseEntity<OverviewResponse> overview(
             @Parameter(hidden = true)

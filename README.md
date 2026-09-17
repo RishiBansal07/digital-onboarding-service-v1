@@ -20,7 +20,7 @@ Built with Java 21, Spring Boot 3.3.5, Spring Data JPA and H2.
 | Only Netherlands and Belgium allowed | `@AllowedCountry` + `app.registration.allowed-countries` |
 | Easy to add new countries | Config list in `application.yml` — no code change |
 | 18+ only | `@MinimumAge(18)` |
-| Limit API traffic to reduce DB load | `ApiRateLimitFilter`; strict DB throughput control remains a future enhancement |
+| Protect the legacy database (maximum 2 operations/second) | `DatabaseAccessInterceptor` + `DatabaseOperationRateLimiter` |
 
 ---
 
@@ -65,8 +65,7 @@ Open http://localhost:8085/swagger-ui.html. Stop with `docker compose down`.
 If port 8085 is occupied, stop the local application or change the host port in
 `compose.yaml`. Java and Maven are included in the build image.
 
-The image build skips tests because the current rate-limit test is timing-dependent;
-run `mvn test` separately. H2 data and sessions are lost when the container stops.
+The image build runs the complete test suite. H2 data and sessions are lost when the container stops.
 The H2 console is disabled in the container, and the port is exposed only on localhost.
 
 ---
@@ -150,7 +149,7 @@ curl http://localhost:8085/overview \
 
 ## Error Responses
 
-Controller errors use the following shape. The filter's `429` response currently includes only `code` and `message`.
+Controller errors use the following shape.
 
 ```json
 {
@@ -167,7 +166,6 @@ Controller errors use the following shape. The filter's `429` response currently
 | Username already taken | 409 | `CONFLICT` |
 | Bad credentials, missing or invalid token | 401 | `UNAUTHORIZED` |
 | Account not found | 404 | `NOT_FOUND` |
-| Rate limit exceeded | 429 | `TOO_MANY_REQUESTS` |
 | Unexpected failure | 500 | `INTERNAL_ERROR` |
 
 ---
@@ -177,7 +175,7 @@ Controller errors use the following shape. The filter's `429` response currently
 ```yaml
 app:
   db:
-    max-requests-per-second: 2      # API request limit, not SQL throughput
+    max-operations-per-second: 2    # global repository-operation throughput per instance
   registration:
     allowed-countries: NL,BE        # extend this comma-separated list
 ```
@@ -190,21 +188,25 @@ Adding a new country is a one-line config change and requires no redeployment of
 
 ### Protecting the legacy database
 
-`ApiRateLimitFilter` runs **before** Spring MVC and allows two API requests per
-calendar second per instance. A request can execute several SQL statements, so this
-does not yet enforce the database's two-requests-per-second limit.
+`DatabaseAccessInterceptor` applies Spring AOP around every public Spring Data repository
+method in this service. Before a repository operation starts, the interceptor calls the
+global `DatabaseOperationRateLimiter`. At the default rate of two operations per second,
+operation starts are spaced by 500 ms.
 
-Placing the limit in a filter rather than in the service layer means a rejected request
-never reaches the controller, never opens a transaction, and never acquires a database
-connection. Requests over budget receive `429 Too Many Requests` immediately.
+The limiter is intentionally global rather than per-user, per-IP, or per-endpoint. The
+constraint being modelled is total legacy-database throughput. A per-user limit would
+still allow many users to overload the same database.
 
-The counter is intentionally **global** rather than per-user or per-IP. The constraint
-being modelled is the database's total throughput, not fairness between clients — a
-per-user limit would still allow 10 users × 2 req/sec = 20 req/sec to reach the database.
+Excess operations **wait in a fair in-process queue** instead of being rejected. This is
+important for registration, which performs several repository operations in one
+`@Transactional` unit. Returning `429` during its third operation would roll back every
+registration; queuing lets the customer and account rows commit or roll back together
+while still pacing database access. The trade-off is increased response latency under
+load: a normal registration takes roughly 1.5 seconds at the default rate.
 
-Registration is additionally wrapped in a single `@Transactional` unit so that the
-customer and account rows commit or roll back together. This still requires multiple
-database round trips.
+The rate is configurable through `app.db.max-operations-per-second`. Unit tests use a
+controllable monotonic clock, and `DatabaseThrottleIntegrationTest` verifies that the AOP
+advice is applied to real Spring Data repository proxies.
 
 ### Why there is no response cache
 
@@ -280,8 +282,10 @@ Current scope limitations:
 - Tokens do not expire and there is no logout endpoint.
 - The session store is in-memory, so tokens are lost on restart and would not work across
   multiple instances. A shared store (for example Redis) would be required to scale out.
-- The rate limiter counter is per-instance; a clustered deployment would need a
-  distributed counter.
+- The database-operation queue is per-instance; a clustered deployment would need a
+  shared/distributed limiter so the combined rate remains two operations per second.
+- The in-process queue has no request timeout or maximum depth. Production deployment
+  should add bounded waiting and overload handling based on an agreed service-level target.
 - H2 in-memory is used for portability; data does not survive a restart.
 
 ---
@@ -292,12 +296,12 @@ The following gaps remain open; documenting them does not resolve them.
 
 | Area | Problem and proposed solution |
 |---|---|
-| Database throughput | API limits allow multiple SQL calls and bursts across second boundaries. Pace database operations to enforce two requests per second, with a shared budget when scaling out. |
+| Distributed database throughput | Replace the per-instance limiter with a shared budget when scaling to multiple application instances. |
 | Concurrent registration | Simultaneous requests can pass uniqueness checks and return 500. Map username constraint violations to 409 and retry IBAN collisions in a fresh transaction. |
-| Reliable tests | The rate-limit test depends on wall-clock timing. Inject a controllable clock; add SQL throughput, concurrency, rollback, Belgium, and exact-age-18 coverage. |
-| API contract | OpenAPI authentication, validation limits, and error schemas differ from the implementation. Align both specifications and standardize all error responses, including 429. |
+| Additional resilience tests | Add sustained-load, queue-timeout, rollback, Belgium, and exact-age-18 coverage. |
+| API contract | Keep authentication, validation limits, and error schemas aligned between the static and generated OpenAPI specifications. |
 | Error privacy | Unexpected errors expose internal exception messages. Log details server-side and return a generic message to clients. |
-| Documentation and delivery | Postman pacing instructions are outdated. Align instructions with the collection and commit all required artifacts before submission. |
+| Documentation and delivery | Align the Postman pacing scenarios and architecture document with the blocking database-operation throttle. |
 
 ---
 

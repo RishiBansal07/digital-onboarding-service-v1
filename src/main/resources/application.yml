@@ -6,6 +6,13 @@ spring:
     driver-class-name: org.h2.Driver
     username: admin
     password: admin
+    # Database connection pool configuration
+    hikari:
+      maximum-pool-size: 5          # Allow 5 connections for concurrent operations
+      minimum-idle: 2                # Keep 2 connections warm
+      connection-timeout: 10000      # Wait up to 10 seconds for connection
+      idle-timeout: 300000           # Close idle connections after 5 minutes
+      max-lifetime: 1200000          # Max connection lifetime: 20 minutes
   jpa:
     hibernate:
       ddl-auto: update
@@ -29,12 +36,9 @@ logging:
 
 app:
   db:
-    max-requests-per-second: 2
+    # Repository operations are started at most twice per second per application instance.
+    max-operations-per-second: 2
   registration:
     # Comma-separated so it resolves as a single property value.
     # Add a country by extending this list, e.g. NL,BE,DE
     allowed-countries: NL,BE
-
-#server:
-#  error:
-#    include-message: always

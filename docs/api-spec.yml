@@ -35,7 +35,7 @@ paths:
         - Username must be unique
         - Customer must be at least 18 years old
         - Only Netherlands (NL) and Belgium (BE) are allowed
-        - Rate limited to 2 requests per second globally
+        - Database repository operations are queued and started at most twice per second per instance
       operationId: registerCustomer
       requestBody:
         required: true
@@ -98,18 +98,6 @@ paths:
                 message: "Username already exists"
                 details: null
                 timestamp: 1758000000000
-        '429':
-          description: Rate limit exceeded (max 2 requests per second)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                code: TOO_MANY_REQUESTS
-                message: "Too many requests. Maximum 2 requests per second allowed."
-                details: null
-                timestamp: 1758000000000
-
   /login:
     post:
       tags:
@@ -154,13 +142,6 @@ paths:
                 message: "Invalid username or password"
                 details: null
                 timestamp: 1758000000000
-        '429':
-          description: Rate limit exceeded (max 2 requests per second)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /overview:
     get:
       tags:
@@ -226,12 +207,6 @@ paths:
                 message: "Account not found"
                 details: null
                 timestamp: 1758000000000
-        '429':
-          description: Rate limit exceeded (max 2 requests per second)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
 components:
   securitySchemes:
@@ -389,7 +364,6 @@ components:
             - UNAUTHORIZED
             - CONFLICT
             - NOT_FOUND
-            - TOO_MANY_REQUESTS
             - INTERNAL_ERROR
         message:
           type: string

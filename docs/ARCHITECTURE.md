@@ -15,14 +15,6 @@ the token/session mechanism, and the database-protection (rate limiting) strateg
                                 │
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  SERVLET FILTER LAYER                                                │
-│  ApiRateLimitFilter            ← runs BEFORE Spring MVC              │
-│  • throttles /register, /login, /overview                            │
-│  • returns 429 directly if budget exhausted                          │
-└───────────────────────────────┬──────────────────────────────────────┘
-                                │ (allowed)
-                                ▼
-┌──────────────────────────────────────────────────────────────────────┐
 │  CONTROLLER LAYER                                                    │
 │  OnboardingController          ← @RestController                     │
 │  • @Valid triggers DTO validation                                    │
@@ -43,6 +35,7 @@ the token/session mechanism, and the database-protection (rate limiting) strateg
 ┌──────────────────────────────────────────────────────────────────────┐
 │  REPOSITORY LAYER                                                    │
 │  CustomerRepository  ·  AccountRepository       (Spring Data JPA)    │
+│  DatabaseAccessInterceptor → DatabaseOperationRateLimiter (2 ops/s)  │
 └───────────────────────────────┬──────────────────────────────────────┘
                                 │
                                 ▼
@@ -61,10 +54,11 @@ the token/session mechanism, and the database-protection (rate limiting) strateg
 |---|---|
 | `DigitalOnboardingServiceApplication.java` | Boots Spring. |
 
-### Filter layer
+### Database protection
 | File | Role |
 |---|---|
-| `config/ApiRateLimitFilter.java` | Servlet filter. Caps traffic to the 3 exposed endpoints at N req/sec (default 2) to shield the legacy DB. Short-circuits with `429` — the request never reaches the controller. |
+| `config/DatabaseAccessInterceptor.java` | Spring AOP advice that intercepts public repository operations before they reach JPA. |
+| `config/DatabaseOperationRateLimiter.java` | Fair blocking throttle that spaces operation starts according to `app.db.max-operations-per-second` (default 2). |
 
 ### Controller layer
 | File | Role |
@@ -264,98 +258,39 @@ sees `AuthenticationServiceImpl` or the underlying `SessionService` implementati
 
 ---
 
-## 5. ApiRateLimitFilter — protecting the legacy DB
+## 5. Database-operation throttling — protecting the legacy DB
 
-### Why a filter and not an annotation?
-
-The assignment states the legacy DB cannot handle more than ~2 requests/second. A
-**servlet filter** sits in front of everything — controller, services, JPA. Rejecting
-there means a throttled request costs almost nothing and never opens a DB connection.
+The assignment limits database throughput, not HTTP request throughput. One registration
+request performs several repository operations, so limiting API calls would not reliably
+protect the database. Spring AOP therefore intercepts repository methods directly.
 
 ```
-Request
-   │
-   ▼
-┌──────────────────────┐
-│ shouldNotFilter()    │  is URI one of /register, /login, /overview?
-└──────┬───────────────┘
-       │ no  ──────────────────────────► skip filter, continue normally
-       │ yes
-       ▼
-┌──────────────────────┐
-│ tryConsume()         │  (synchronized)
-│                      │
-│  now = epochSecond   │
-│  now != window?      │──yes──► window = now; counter = 0   (new 1-second bucket)
-│         │            │
-│         no           │
-│         ▼            │
-│  counter >= max?     │──yes──► return false
-│         │            │
-│         no           │
-│         ▼            │
-│  counter++           │
-│  return true         │
-└──────┬───────────────┘
-       │
-   ┌───┴────┐
-   │        │
- true     false
-   │        │
-   ▼        ▼
-filterChain  429 TOO_MANY_REQUESTS
-.doFilter()  {"code":"TOO_MANY_REQUESTS", ...}
-   │         (written directly to the response —
-   ▼          never reaches DispatcherServlet)
-Controller
+Controller → Service → Spring Data repository proxy
+                              │
+                              ▼
+                    DatabaseAccessInterceptor
+                              │
+                              ▼
+                    DatabaseOperationRateLimiter
+                    wait for next 500 ms slot
+                              │
+                              ▼
+                         DB operation
 ```
 
-### Timeline example (limit = 2/sec)
+`DatabaseOperationRateLimiter` uses a fair lock and a monotonic clock. With
+`app.db.max-operations-per-second: 2`, operation starts are spaced by 500 ms. Concurrent
+callers queue in arrival order instead of starting together.
 
-```
- second 100          second 101          second 102
- ├─────────────┐     ├─────────────┐     ├─────────────┐
- │ req1 → 200  │     │ req4 → 200  │     │ req6 → 200  │
- │ req2 → 200  │     │ req5 → 200  │     │             │
- │ req3 → 429  │     │             │     │             │
- └─────────────┘     └─────────────┘     └─────────────┘
-   counter=2           counter reset       counter reset
-   budget spent        to 0                to 0
-```
+Waiting rather than returning `429` is deliberate. Registration is transactional and
+requires multiple repository calls; rejecting a later call would roll back the customer
+and account every time. Queuing preserves transaction completion while enforcing the
+legacy throughput constraint. The expected trade-off is increased response latency under
+load.
 
-### Key implementation details
-
-- `OncePerRequestFilter` — guarantees it runs exactly once per request, even with forwards.
-- `shouldNotFilter()` — exempts everything else (Swagger UI, H2 console, actuator).
-- `synchronized tryConsume()` — makes the check-and-increment atomic; without it two
-  concurrent threads could both read `counter=1` and both pass, exceeding the limit.
-- Fixed 1-second window, reset lazily on the first request of a new second.
-- Limit is configurable via `app.db.max-requests-per-second` in `application.yml`.
-
-### Important nuance
-
-`GlobalExceptionHandler` is a `@RestControllerAdvice` — it only sees exceptions raised
-**inside** Spring MVC. The filter runs *before* `DispatcherServlet`, so it cannot rely on
-the advice and therefore writes its `429` JSON body manually.
-
-```
-   ApiRateLimitFilter          ← exceptions here are NOT caught by @RestControllerAdvice
-          │
-          ▼
-   DispatcherServlet
-          │
-          ▼
-   OnboardingController        ← exceptions from here ARE caught
-          │
-          ▼
-   Services / Repositories     ← exceptions from here ARE caught (they bubble up)
-```
-
-### Scope caveat
-
-The counter is **global**, not per-user or per-IP. That is intentional: the constraint
-being modelled is the *database's* total capacity, not fairness between clients. A
-per-user limiter would still allow 10 users × 2 req/sec = 20 req/sec to hit the DB.
+The limiter is global within one application instance. Multiple service instances would
+require a shared limiter so their combined database rate remains two operations per
+second. A production version should also bound queue depth and waiting time.
 
 ---
 
@@ -363,7 +298,6 @@ per-user limiter would still allow 10 users × 2 req/sec = 20 req/sec to hit the
 
 ```
  STEP 1 ── POST /register
-   RateLimitFilter ✓
    @Valid: name, address, username pattern, age ≥ 18, country ∈ {NL, BE}
    RegistrationService (@Transactional)
      ├─ existsByUsername? ──► ConflictException 409 if taken
@@ -372,11 +306,10 @@ per-user limiter would still allow 10 users × 2 req/sec = 20 req/sec to hit the
      ├─ IbanGenerator.generateIban()  (retry until unique, max 10)
      └─ save Account (CURRENT, 0.00, EUR)
    ⇩
-   200 { username, defaultPassword, "Registration successful" }
+   201 { username, defaultPassword, "Registration successful" }
 
 
  STEP 2 ── POST /login
-   RateLimitFilter ✓
    AuthenticationService.login()
      ├─ findByUsername ──► 401 if absent
      ├─ password equals? ──► 401 if mismatch
@@ -386,7 +319,6 @@ per-user limiter would still allow 10 users × 2 req/sec = 20 req/sec to hit the
 
 
  STEP 3 ── GET /overview   (Authorization: Bearer <token>)
-   RateLimitFilter ✓
    extractBearerToken() ──► 401 if header malformed
    AuthenticationService.getUsernameByToken() ──► 401 if token unknown
    AccountService.getAccountOverview()
@@ -409,10 +341,9 @@ per-user limiter would still allow 10 users × 2 req/sec = 20 req/sec to hit the
 | Missing/invalid token | `OnboardingController` / `SessionService` | 401 | `UNAUTHORIZED` |
 | Account not found | `AccountService` | 404 | `NOT_FOUND` |
 | IBAN generation exhausted | `RegistrationService` | 400 | `BAD_REQUEST` |
-| Rate limit exceeded | `ApiRateLimitFilter` | 429 | `TOO_MANY_REQUESTS` |
 | Anything else | `GlobalExceptionHandler` | 500 | `INTERNAL_ERROR` |
 
-All except `429` are rendered by `GlobalExceptionHandler` as:
+Errors are rendered by `GlobalExceptionHandler` as:
 
 ```json
 {

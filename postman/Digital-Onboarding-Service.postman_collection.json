@@ -2,57 +2,10 @@
   "info": {
     "_postman_id": "digital-onboarding-service-v2",
     "name": "Digital Onboarding Service",
-    "description": "Customer onboarding and remote account opening APIs.\n\nFolders:\n1. Happy Path - full register/login/overview flow\n2. Negative - Registration\n3. Negative - Login\n4. Negative - Authorization\n5. Rate Limiter (legacy DB protection)\n\nIMPORTANT: the service caps traffic at 2 requests/second globally. A collection-level pre-request script paces requests so the functional tests do not trip the limiter. The rate limiter folder deliberately bypasses that pacing.",
+    "description": "Customer onboarding and remote account opening APIs.\n\nFolders:\n1. Happy Path - full register/login/overview flow\n2. Negative - Registration\n3. Negative - Login\n4. Negative - Authorization\n\nDatabase repository operations are queued and started at a maximum of two per second per application instance.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "event": [
-    {
-      "listen": "prerequest",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "// The service allows 2 requests/second GLOBALLY. Pace requests so functional",
-          "// tests are not throttled by traffic from earlier tests.",
-          "//",
-          "// The gap must exceed 1000ms. With a smaller gap (say 700ms) two consecutive",
-          "// requests can still land inside the same one-second window, which is already",
-          "// the entire budget - leaving no headroom for tests that issue a setup request",
-          "// of their own. 1100ms gives every request its own window.",
-          "//",
-          "// NOTE: this relies on Postman honouring setTimeout in a pre-request script.",
-          "// If you still see 429s, set a Delay of 1100ms in Collection Runner instead -",
-          "// that is native and always reliable.",
-          "const enabled = String(pm.collectionVariables.get('pacingEnabled')) !== 'false';",
-          "if (enabled) {",
-          "    const gapMs = Number(pm.collectionVariables.get('requestGapMs')) || 1100;",
-          "    const last = Number(pm.collectionVariables.get('lastRequestAt')) || 0;",
-          "    const wait = Math.max(0, gapMs - (Date.now() - last));",
-          "    if (wait > 0) {",
-          "        setTimeout(function () {}, wait);",
-          "    }",
-          "    pm.collectionVariables.set('lastRequestAt', Date.now() + wait);",
-          "}"
-        ]
-      }
-    },
-    {
-      "listen": "test",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "// Turn a confusing rate-limit failure into an actionable message.",
-          "// Requests in the Rate Limiter folder expect 429, so skip them.",
-          "const expects429 = /Burst|Limiter|Rate/i.test(pm.info.requestName);",
-          "if (!expects429 && pm.response && pm.response.code === 429) {",
-          "    console.error('⚠️  \"' + pm.info.requestName + '\" was throttled (429).');",
-          "    console.error('   This is a pacing problem, not a real assertion failure.');",
-          "    console.error('   Fix: set requestGapMs to 1100 (or higher), or set a Delay');",
-          "    console.error('        of 1100ms in Collection Runner.');",
-          "}"
-        ]
-      }
-    }
-  ],
+  "event": [],
   "item": [
     {
       "name": "1. Happy Path",
@@ -235,10 +188,6 @@
                 "exec": [
                   "// Make this test self-contained: ensure the username already exists.",
                   "//",
-                  "// This seed request spends rate-limit budget that the collection-level",
-                  "// pacer does not know about, so record it in lastRequestAt. Without that,",
-                  "// the main request below fires in the same window and gets a 429 instead",
-                  "// of the 409 this test is asserting on.",
                   "const baseUrl = pm.collectionVariables.get('baseUrl');",
                   "const probe = 'duplicate_probe_user';",
                   "pm.environment.unset('duplicateUser');",
@@ -263,10 +212,7 @@
                   "    // 201 on first run, 409 afterwards - both mean the user now exists.",
                   "    const status = err ? 'error' : res.code;",
                   "    console.log('Seed registration status:', status);",
-                  "    if (status === 429) {",
-                  "        console.error('⚠️  Seed was throttled; duplicate_probe_user may not exist yet.');",
-                  "    }",
-                  "    pm.collectionVariables.set('lastRequestAt', Date.now());",
+                  "    // 201 or 409 means the duplicate precondition is satisfied.",
                   "});"
                 ]
               }
@@ -983,218 +929,6 @@
           }
         }
       ]
-    },
-    {
-      "name": "5. Rate Limiter",
-      "description": "The legacy DB is protected by a global 2 req/sec limit enforced in ApiRateLimitFilter. These requests deliberately burst past the limit using pm.sendRequest, which bypasses the collection-level pacing script.",
-      "item": [
-        {
-          "name": "Burst Test - expect 429",
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Fire a rapid burst at /overview and record every status code.",
-                  "// Requests are sequential but fast on localhost, so they land in the",
-                  "// same one-second window and trip the limiter.",
-                  "//",
-                  "// An invalid token is used on purpose: the filter runs BEFORE the",
-                  "// controller, so allowed requests return 401 and throttled ones 429.",
-                  "// That difference is exactly what we assert on.",
-                  "",
-                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
-                  "const burstSize = Number(pm.collectionVariables.get('rateLimitBurstSize')) || 8;",
-                  "const statuses = [];",
-                  "",
-                  "function fire(i, done) {",
-                  "    if (i >= burstSize) { return done(); }",
-                  "    pm.sendRequest({",
-                  "        url: baseUrl + '/overview',",
-                  "        method: 'GET',",
-                  "        header: { 'Authorization': 'Bearer rate-limit-probe' }",
-                  "    }, function (err, res) {",
-                  "        statuses.push(err ? 0 : res.code);",
-                  "        fire(i + 1, done);",
-                  "    });",
-                  "}",
-                  "",
-                  "fire(0, function () {",
-                  "    pm.collectionVariables.set('burstStatuses', JSON.stringify(statuses));",
-                  "    console.log('Burst statuses:', statuses.join(', '));",
-                  "    // The burst just exhausted the budget. Tell the pacer so the next",
-                  "    // request waits instead of inheriting a spent window.",
-                  "    pm.collectionVariables.set('lastRequestAt', Date.now());",
-                  "});"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const statuses = JSON.parse(pm.collectionVariables.get('burstStatuses') || '[]');",
-                  "const throttled = statuses.filter(function (s) { return s === 429; });",
-                  "const allowed = statuses.filter(function (s) { return s !== 429 && s !== 0; });",
-                  "const maxPerSecond = Number(pm.collectionVariables.get('maxRequestsPerSecond')) || 2;",
-                  "",
-                  "console.log('Statuses:', statuses.join(', '));",
-                  "console.log('Allowed:', allowed.length, '| Throttled:', throttled.length);",
-                  "",
-                  "pm.test('Burst actually executed', function () {",
-                  "    pm.expect(statuses.length).to.be.above(0);",
-                  "});",
-                  "",
-                  "pm.test('Limiter rejected at least one request with 429', function () {",
-                  "    pm.expect(throttled.length).to.be.above(0);",
-                  "});",
-                  "",
-                  "pm.test('Some requests were allowed through', function () {",
-                  "    pm.expect(allowed.length).to.be.above(0);",
-                  "});",
-                  "",
-                  "pm.test('Allowed count respects the configured budget', function () {",
-                  "    // The burst can straddle a window boundary, so allow a small margin.",
-                  "    pm.expect(allowed.length).to.be.at.most(maxPerSecond * 2);",
-                  "});",
-                  "",
-                  "pm.test('Throttled response uses the documented error shape', function () {",
-                  "    pm.response.to.have.status(429);",
-                  "    const body = pm.response.json();",
-                  "    pm.expect(body.code).to.eql('TOO_MANY_REQUESTS');",
-                  "    pm.expect(body.message).to.include('Rate limit exceeded');",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer rate-limit-probe" }],
-            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
-            "description": "The pre-request script exhausts the per-second budget, so this request itself is throttled with 429."
-          }
-        },
-        {
-          "name": "Recovery After One Second - expect not 429",
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// The limiter resets every second. Wait past the window used by the",
-                  "// burst test so this request finds a fresh budget.",
-                  "setTimeout(function () {}, 1500);"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Limiter recovered - not throttled', function () {",
-                  "    pm.expect(pm.response.code).to.not.eql(429);",
-                  "});",
-                  "",
-                  "pm.test('Request reached the controller (401 for the fake token)', function () {",
-                  "    pm.response.to.have.status(401);",
-                  "    pm.expect(pm.response.json().code).to.eql('UNAUTHORIZED');",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer rate-limit-probe" }],
-            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
-            "description": "Proves the limiter is a per-second window, not a permanent block."
-          }
-        },
-        {
-          "name": "Limiter Is Global - Register Burst",
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Same burst, but against /register, to show the limit is global",
-                  "// across protected endpoints rather than per-endpoint.",
-                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
-                  "const burstSize = Number(pm.collectionVariables.get('rateLimitBurstSize')) || 8;",
-                  "const statuses = [];",
-                  "const stamp = Date.now();",
-                  "",
-                  "function body(i) {",
-                  "    return JSON.stringify({",
-                  "        fullName: 'Burst User',",
-                  "        address: 'Damrak 1, Amsterdam',",
-                  "        username: 'burst_' + stamp + '_' + i,",
-                  "        dateOfBirth: '1990-05-20',",
-                  "        countryCode: 'NL'",
-                  "    });",
-                  "}",
-                  "",
-                  "function fire(i, done) {",
-                  "    if (i >= burstSize) { return done(); }",
-                  "    pm.sendRequest({",
-                  "        url: baseUrl + '/register',",
-                  "        method: 'POST',",
-                  "        header: { 'Content-Type': 'application/json' },",
-                  "        body: { mode: 'raw', raw: body(i) }",
-                  "    }, function (err, res) {",
-                  "        statuses.push(err ? 0 : res.code);",
-                  "        fire(i + 1, done);",
-                  "    });",
-                  "}",
-                  "",
-                  "fire(0, function () {",
-                  "    pm.collectionVariables.set('registerBurstStatuses', JSON.stringify(statuses));",
-                  "    console.log('Register burst statuses:', statuses.join(', '));",
-                  "    pm.collectionVariables.set('lastRequestAt', Date.now());",
-                  "});"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const statuses = JSON.parse(pm.collectionVariables.get('registerBurstStatuses') || '[]');",
-                  "const throttled = statuses.filter(function (s) { return s === 429; });",
-                  "const created = statuses.filter(function (s) { return s === 201; });",
-                  "",
-                  "console.log('Register burst:', statuses.join(', '));",
-                  "console.log('Created:', created.length, '| Throttled:', throttled.length);",
-                  "",
-                  "pm.test('Registration is rate limited as well', function () {",
-                  "    pm.expect(throttled.length).to.be.above(0);",
-                  "});",
-                  "",
-                  "pm.test('Throttled registrations never created a customer', function () {",
-                  "    pm.expect(created.length).to.be.below(statuses.length);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer rate-limit-probe" }],
-            "url": { "raw": "{{baseUrl}}/overview", "host": ["{{baseUrl}}"], "path": ["overview"] },
-            "description": "Shows the budget is shared across /register, /login and /overview."
-          }
-        }
-      ]
     }
   ],
   "variable": [
@@ -1205,14 +939,6 @@
     { "key": "duplicateUser", "value": "", "type": "string" },
     { "key": "underageDob", "value": "", "type": "string" },
     { "key": "futureDob", "value": "", "type": "string" },
-    { "key": "wrongPasswordMessage", "value": "", "type": "string" },
-    { "key": "burstStatuses", "value": "", "type": "string" },
-    { "key": "registerBurstStatuses", "value": "", "type": "string" },
-    { "key": "lastRequestAt", "value": "0", "type": "string" },
-    { "key": "requestGapMs", "value": "1100", "type": "string" },
-    { "key": "pacingEnabled", "value": "true", "type": "string" },
-    { "key": "rateLimitBurstSize", "value": "8", "type": "string" },
-    { "key": "maxRequestsPerSecond", "value": "2", "type": "string" }
+    { "key": "wrongPasswordMessage", "value": "", "type": "string" }
   ]
 }
-

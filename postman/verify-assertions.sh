@@ -27,40 +27,6 @@ code() { curl -s -o /tmp/b.json -w '%{http_code}' "$@"; }
 body() { cat /tmp/b.json; }
 has() { grep -q "$1" /tmp/b.json && echo 1 || echo 0; }
 
-echo "=== 5. RATE LIMITER: burst ==="
-sleep 2
-statuses=""
-for i in 1 2 3 4 5 6 7 8; do
-  c=$(code -X GET "$BASE/overview" -H 'Authorization: Bearer rate-limit-probe')
-  statuses="$statuses $c"
-done
-echo "  statuses:$statuses"
-throttled=$(echo $statuses | tr ' ' '\n' | grep -c '^429$')
-allowed=$(echo $statuses | tr ' ' '\n' | grep -v '^429$' | grep -c '^[0-9]')
-echo "  allowed=$allowed throttled=$throttled"
-ok "at least one 429" $([ "$throttled" -gt 0 ] && echo 1 || echo 0)
-ok "some allowed through" $([ "$allowed" -gt 0 ] && echo 1 || echo 0)
-ok "allowed <= budget*2 (4)" $([ "$allowed" -le 4 ] && echo 1 || echo 0)
-echo "  429 body: $(body)"
-ok "429 body code=TOO_MANY_REQUESTS" $(has TOO_MANY_REQUESTS)
-ok "429 body has 'Rate limit exceeded'" $(has 'Rate limit exceeded')
-
-echo "=== 5. RATE LIMITER: recovery ==="
-sleep 2
-c=$(code -X GET "$BASE/overview" -H 'Authorization: Bearer rate-limit-probe')
-chk "recovered, reached controller (401 not 429)" "401" "$c"
-
-echo "=== 5. RATE LIMITER: global across /register ==="
-sleep 2
-rstat=""
-for i in 1 2 3 4 5 6 7 8; do
-  c=$(code -X POST "$BASE/register" -H 'Content-Type: application/json' \
-    -d "{\"fullName\":\"Burst User\",\"address\":\"Damrak 1, Amsterdam\",\"username\":\"burst_$$_$i\",\"dateOfBirth\":\"1990-05-20\",\"countryCode\":\"NL\"}")
-  rstat="$rstat $c"
-done
-echo "  statuses:$rstat"
-rthr=$(echo $rstat | tr ' ' '\n' | grep -c '^429$')
-ok "register is rate limited too" $([ "$rthr" -gt 0 ] && echo 1 || echo 0)
 
 echo "=== 1. HAPPY PATH ==="
 sleep 2

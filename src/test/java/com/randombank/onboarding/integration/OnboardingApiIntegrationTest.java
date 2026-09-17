@@ -17,11 +17,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Covers the main onboarding flow and the most important failure cases.
- * The rate limit is raised here so it does not interfere; it has its own test.
+ * The database-operation rate is raised here so it does not interfere; it has its own test.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@TestPropertySource(properties = "app.db.max-requests-per-second=1000")
+@TestPropertySource(properties = "app.db.max-operations-per-second=100000")
 class OnboardingApiIntegrationTest {
 
     @Autowired

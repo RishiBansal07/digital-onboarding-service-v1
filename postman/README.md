@@ -18,102 +18,23 @@ Run the whole thing with **Collection Runner**, or run folders individually.
 | 2. Negative - Registration | 12 | validation and conflict rules |
 | 3. Negative - Login | 4 | auth failures and user enumeration |
 | 4. Negative - Authorization | 5 | Bearer token handling |
-| 5. Rate Limiter | 3 | legacy DB protection |
 
-**27 requests, ~70 assertions.**
-
----
-
-## The rate limit will bite you (and how the collection handles it)
-
-The service allows **2 requests/second globally** across `/register`, `/login` and
-`/overview`. Naively running 27 requests back to back means most of them return `429`
-and every assertion fails for the wrong reason.
-
-The collection solves this with a **collection-level pre-request script** that paces
-requests:
-
-```javascript
-const gapMs = Number(pm.collectionVariables.get('requestGapMs')) || 700;
-const last  = Number(pm.collectionVariables.get('lastRequestAt')) || 0;
-const wait  = Math.max(0, gapMs - (Date.now() - last));
-if (wait > 0) { setTimeout(function () {}, wait); }
-pm.collectionVariables.set('lastRequestAt', Date.now() + wait);
-```
-
-700 ms between requests keeps you at ~1.4 req/sec, safely under the limit.
-
-Set `pacingEnabled = false` to turn it off.
+**24 requests covering the happy path and principal failure scenarios.**
 
 ---
 
-## Testing the rate limiter
+## Database throttling behavior
 
-Pacing makes normal tests reliable, but it is the opposite of what a limiter test needs.
-The rate limiter folder bypasses it by firing bursts with `pm.sendRequest()` inside the
-**pre-request script** — those calls do not go through collection-level scripts.
+The service does not reject API requests based on their arrival rate. Instead,
+`DatabaseAccessInterceptor` queues repository operations and
+`DatabaseOperationRateLimiter` starts at most two operations per second per application
+instance. The collection therefore needs no pacing script.
 
-### Burst Test — expect 429
-
-Pre-request fires 8 rapid requests and records each status:
-
-```javascript
-const burstSize = Number(pm.collectionVariables.get('rateLimitBurstSize')) || 8;
-const statuses = [];
-
-function fire(i, done) {
-    if (i >= burstSize) { return done(); }
-    pm.sendRequest({
-        url: baseUrl + '/overview',
-        method: 'GET',
-        header: { 'Authorization': 'Bearer rate-limit-probe' }
-    }, function (err, res) {
-        statuses.push(err ? 0 : res.code);
-        fire(i + 1, done);
-    });
-}
-
-fire(0, function () {
-    pm.collectionVariables.set('burstStatuses', JSON.stringify(statuses));
-});
-```
-
-Requests are sequential but each takes only a few ms on localhost, so all 8 land inside
-the same one-second window.
-
-**An invalid token is used deliberately.** `ApiRateLimitFilter` runs *before* the
-controller, so requests within budget return `401` and throttled ones return `429`.
-That difference is exactly what the test asserts on — no valid session required.
-
-Observed output:
-
-```
-statuses: 401 401 429 429 429 429 429 429
-allowed=2  throttled=6
-```
-
-Exactly 2 allowed, matching `app.db.max-requests-per-second: 2`.
-
-Assertions:
-- at least one `429`
-- some requests allowed through
-- allowed count ≤ budget × 2 (margin for straddling a window boundary)
-- `429` body is `{"code":"TOO_MANY_REQUESTS", ...}`
-
-### Recovery After One Second — expect not 429
-
-Waits 1500 ms, then asserts the request is **not** throttled and reaches the controller
-(`401` for the fake token). Proves the limiter is a rolling per-second window, not a
-permanent block.
-
-### Limiter Is Global — Register Burst
-
-Bursts `/register` instead, proving the budget is shared across endpoints rather than
-per-endpoint:
-
-```
-statuses: 201 201 201 429 429 429 429 429
-```
+Requests that access the database can take longer under load. At the default setting,
+registration performs several repository operations and normally takes roughly 1.5
+seconds. This waiting is expected and protects the legacy database without failing a
+transaction halfway through. Automated throughput behavior is covered by the Java unit
+and Spring integration tests rather than by status-code assertions in Postman.
 
 ---
 
@@ -180,13 +101,6 @@ token without the `Bearer ` prefix. It looks like a missing header but is not.
 | `authToken` | *(auto)* | set by Login |
 | `username` | *(auto)* | set by Register |
 | `defaultPassword` | *(auto)* | set by Register |
-| `pacingEnabled` | `true` | toggle request pacing |
-| `requestGapMs` | `700` | delay between requests |
-| `rateLimitBurstSize` | `8` | requests per burst |
-| `maxRequestsPerSecond` | `2` | must match `application.yml` |
-
-If you change `app.db.max-requests-per-second` in `application.yml`, update
-`maxRequestsPerSecond` to match.
 
 ---
 
@@ -213,7 +127,7 @@ bash postman/verify-assertions.sh
 ```
 
 ```
-RESULT  pass=62  fail=0
+RESULT  pass=55  fail=0
 ```
 
 Useful in CI or when Postman/Newman is unavailable.
@@ -222,16 +136,8 @@ Useful in CI or when Postman/Newman is unavailable.
 
 ## Troubleshooting
 
-**Everything returns 429** — pacing is off or `requestGapMs` is too low. Set
-`pacingEnabled = true` and `requestGapMs = 700`. If using Collection Runner, also set a
-delay of ~700 ms.
-
-**Burst test reports no 429** — the service may be slow enough that requests span
-multiple seconds. Raise `rateLimitBurstSize` to 15.
-
 **Folder 3 tests fail with 401 on a valid user** — `{{username}}` is empty. Run the
 Happy Path folder first.
 
-**Duplicate Username returns 201** — the pre-request seed was throttled. Re-run it; the
-user now exists.
+**Duplicate Username returns 201** — rerun the request once so the seeded user exists.
 
