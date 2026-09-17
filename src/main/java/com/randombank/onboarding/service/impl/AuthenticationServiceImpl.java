@@ -30,13 +30,13 @@ class AuthenticationServiceImpl implements AuthenticationService {
         Optional<Customer> customer = customerRepository.findByUsername(username);
 
         if (customer.isEmpty()) {
-            log.debug("Login attempt with unknown username: {}", username);
+            log.debug("Login attempt rejected: invalid credentials");
             throw new UnauthorizedException(INVALID_CREDENTIALS);
         }
 
         // Plain comparison: password encryption is out of scope per the assignment.
         if (!customer.get().getPassword().equals(password)) {
-            log.debug("Login attempt with incorrect password: {}", username);
+            log.debug("Login attempt rejected: invalid credentials");
             throw new UnauthorizedException(INVALID_CREDENTIALS);
         }
 
@@ -48,4 +48,3 @@ class AuthenticationServiceImpl implements AuthenticationService {
         return sessionStore.getUsernameByToken(token);
     }
 }
-

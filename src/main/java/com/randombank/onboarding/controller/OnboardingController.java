@@ -54,7 +54,7 @@ public class OnboardingController {
     })
     public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
         Customer customer = registrationService.registerCustomer(request);
-        log.info("Customer registered: username={}, country={}", customer.getUsername(), request.countryCode());
+        log.info("Customer registration completed: country={}", request.countryCode());
 
         RegisterResponse response = new RegisterResponse(
                 customer.getUsername(),
@@ -76,7 +76,7 @@ public class OnboardingController {
     })
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         String token = authenticationService.login(request.username(), request.password());
-        log.info("User logged in: username={}", request.username());
+        log.info("User login completed");
 
         LoginResponse response = new LoginResponse(
                 request.username(),
@@ -104,8 +104,7 @@ public class OnboardingController {
         String token = AuthorizationUtil.extractBearerToken(authorizationHeader);
         String username = authenticationService.getUsernameByToken(token);
         OverviewResponse response = accountService.getAccountOverview(username);
-        log.info("Account overview retrieved: username={}, iban={}", username, response.accountNumber());
+        log.info("Account overview retrieved");
         return ResponseEntity.ok(response);
     }
 }
-

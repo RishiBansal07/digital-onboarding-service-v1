@@ -65,7 +65,7 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         assertEquals("INTERNAL_ERROR", response.getBody().code());
         assertEquals("Unexpected error occurred", response.getBody().message());
-        assertEquals("Unexpected", response.getBody().details());
+        assertEquals(null, response.getBody().details());
     }
 
     @Test
@@ -76,4 +76,3 @@ class GlobalExceptionHandlerTest {
         assertEquals(true, response.getBody().timestamp() > 0);
     }
 }
-

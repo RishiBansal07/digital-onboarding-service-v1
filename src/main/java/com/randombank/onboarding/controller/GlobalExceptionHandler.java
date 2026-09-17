@@ -91,7 +91,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
         log.error("Unexpected error", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(error("INTERNAL_ERROR", "Unexpected error occurred", ex.getMessage()));
+                .body(error("INTERNAL_ERROR", "Unexpected error occurred", null));
     }
 
     private String toMessage(FieldError fieldError) {
@@ -102,4 +102,3 @@ public class GlobalExceptionHandler {
         return new ErrorResponse(code, message, details, System.currentTimeMillis());
     }
 }
-

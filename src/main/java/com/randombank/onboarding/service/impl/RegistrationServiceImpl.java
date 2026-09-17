@@ -34,7 +34,7 @@ class RegistrationServiceImpl implements RegistrationService {
     @Transactional
     public Customer registerCustomer(RegisterRequest request) {
         if (customerRepository.existsByUsername(request.username())) {
-            log.warn("Duplicate username attempt: username={}", request.username());
+            log.warn("Registration rejected: username already exists");
             throw new ConflictException("Username already exists");
         }
 
@@ -82,4 +82,3 @@ class RegistrationServiceImpl implements RegistrationService {
                 "Failed to generate a unique IBAN after " + MAX_IBAN_ATTEMPTS + " attempts");
     }
 }
-
