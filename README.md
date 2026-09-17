@@ -309,6 +309,3 @@ The following gaps remain open; documenting them does not resolve them.
 
 `docs/ARCHITECTURE.md` contains the full request-flow walkthrough, token lifecycle
 diagrams, and a file-by-file responsibility breakdown.
-
-[Spring Boot 4 upgrade notes](docs/SPRING_BOOT_4_UPGRADE.md) describe the dependency,
-test, and Docker build changes for version 4.0.6.
