@@ -13,8 +13,10 @@ import com.randombank.onboarding.service.PasswordGenerator;
 import com.randombank.onboarding.service.RegistrationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.hibernate.exception.ConstraintViolationException;
 
 import java.math.BigDecimal;
 
@@ -49,7 +51,18 @@ class RegistrationServiceImpl implements RegistrationService {
                 defaultPassword
         );
 
-        Customer savedCustomer = customerRepository.save(customer);
+        Customer savedCustomer;
+        try {
+            // Flush here so a concurrent registration's unique-username violation is
+            // raised inside this method and can be translated to the API's 409 response.
+            savedCustomer = customerRepository.saveAndFlush(customer);
+        } catch (DataIntegrityViolationException ex) {
+            if (isUsernameUniqueConstraintViolation(ex)) {
+                log.warn("Registration rejected: username already exists");
+                throw new ConflictException("Username already exists");
+            }
+            throw ex;
+        }
 
         Account account = new Account(
                 generateUniqueIban(),
@@ -80,5 +93,15 @@ class RegistrationServiceImpl implements RegistrationService {
 
         throw new BadRequestException(
                 "Failed to generate a unique IBAN after " + MAX_IBAN_ATTEMPTS + " attempts");
+    }
+
+    private boolean isUsernameUniqueConstraintViolation(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation
+                    && "uk_customers_username".equalsIgnoreCase(violation.getConstraintName())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

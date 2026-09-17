@@ -5,11 +5,10 @@ package com.randombank.onboarding.service;
  * Format: NLkkBBBBxxxxxxxxxx
  * - NL: country code
  * - kk: check digits (MOD-97)
- * - BBBB: bank code (fixed as RABO for demo)
+ * - BBBB: fixed demo bank code (RABO; not a real issued account)
  * - xxxxxxxxxx: account number (10 digits)
  */
 public interface IbanGenerator {
 
     String generateIban();
 }
-

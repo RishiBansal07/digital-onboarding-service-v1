@@ -10,6 +10,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDate;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -55,6 +57,27 @@ class OnboardingApiIntegrationTest {
         mockMvc.perform(post("/register").contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.username").value("extra_field_user"));
+    }
+
+    @Test
+    void customerFromBelgiumCanRegister() throws Exception {
+        mockMvc.perform(post("/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationJson("belgium_customer", "1990-05-20", "BE")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.username").value("belgium_customer"))
+                .andExpect(jsonPath("$.defaultPassword").isNotEmpty());
+    }
+
+    @Test
+    void customerTurningEighteenTodayCanRegister() throws Exception {
+        String eighteenthBirthday = LocalDate.now().minusYears(18).toString();
+
+        mockMvc.perform(post("/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationJson("exactly_eighteen", eighteenthBirthday, "NL")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.username").value("exactly_eighteen"));
     }
 
     @Test

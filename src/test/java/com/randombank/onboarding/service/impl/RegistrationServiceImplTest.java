@@ -14,9 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.sql.SQLException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,7 +71,7 @@ class RegistrationServiceImplTest {
                 "NL",
                 "password123"
         );
-        when(customerRepository.save(any(Customer.class))).thenReturn(savedCustomer);
+        when(customerRepository.saveAndFlush(any(Customer.class))).thenReturn(savedCustomer);
 
         Account savedAccount = new Account(
                 "NL91RABO0417164300",
@@ -83,7 +86,7 @@ class RegistrationServiceImplTest {
 
         assertNotNull(result);
         assertEquals("john_doe", result.getUsername());
-        verify(customerRepository).save(any(Customer.class));
+        verify(customerRepository).saveAndFlush(any(Customer.class));
         verify(accountRepository).save(any(Account.class));
     }
 
@@ -109,6 +112,49 @@ class RegistrationServiceImplTest {
     }
 
     @Test
+    void registerCustomerTranslatesConcurrentUsernameConstraintViolationToConflict() {
+        RegisterRequest request = new RegisterRequest(
+                "Jane Doe",
+                "Damrak 1, Amsterdam",
+                "racing_user",
+                LocalDate.of(1990, 5, 20),
+                "NL"
+        );
+        when(customerRepository.existsByUsername("racing_user")).thenReturn(false);
+        when(customerRepository.saveAndFlush(any(Customer.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate username",
+                        new ConstraintViolationException("duplicate username", new SQLException(),
+                                "uk_customers_username")));
+
+        ConflictException exception = assertThrows(ConflictException.class,
+                () -> registrationService.registerCustomer(request));
+
+        assertEquals("Username already exists", exception.getMessage());
+        verifyNoInteractions(accountRepository, ibanGenerator);
+    }
+
+    @Test
+    void registerCustomerDoesNotMislabelOtherConstraintViolations() {
+        RegisterRequest request = new RegisterRequest(
+                "Jane Doe",
+                "Damrak 1, Amsterdam",
+                "other_constraint_user",
+                LocalDate.of(1990, 5, 20),
+                "NL"
+        );
+        DataIntegrityViolationException databaseFailure = new DataIntegrityViolationException(
+                "constraint violation",
+                new ConstraintViolationException("constraint violation", new SQLException(), "uk_other"));
+        when(customerRepository.existsByUsername("other_constraint_user")).thenReturn(false);
+        when(customerRepository.saveAndFlush(any(Customer.class))).thenThrow(databaseFailure);
+
+        DataIntegrityViolationException exception = assertThrows(DataIntegrityViolationException.class,
+                () -> registrationService.registerCustomer(request));
+
+        assertSame(databaseFailure, exception);
+    }
+
+    @Test
     void registerCustomerThrowsBadRequestExceptionWhenIbanCollisionAfterMaxAttempts() {
         RegisterRequest request = new RegisterRequest(
                 "Bob Smith",
@@ -130,7 +176,7 @@ class RegistrationServiceImplTest {
                 "NL",
                 "password"
         );
-        when(customerRepository.save(any(Customer.class))).thenReturn(savedCustomer);
+        when(customerRepository.saveAndFlush(any(Customer.class))).thenReturn(savedCustomer);
 
         BadRequestException exception = assertThrows(BadRequestException.class, () ->
                 registrationService.registerCustomer(request)
@@ -138,7 +184,7 @@ class RegistrationServiceImplTest {
 
         assertTrue(exception.getMessage().contains("Failed to generate a unique IBAN"));
         // Customer save is called even though IBAN generation fails later
-        verify(customerRepository).save(any(Customer.class));
+        verify(customerRepository).saveAndFlush(any(Customer.class));
     }
 
     @Test
@@ -167,7 +213,7 @@ class RegistrationServiceImplTest {
                 "NL",
                 "password456"
         );
-        when(customerRepository.save(any(Customer.class))).thenReturn(savedCustomer);
+        when(customerRepository.saveAndFlush(any(Customer.class))).thenReturn(savedCustomer);
 
         Account savedAccount = new Account(
                 "NL92RABO0417164301",
@@ -208,7 +254,7 @@ class RegistrationServiceImplTest {
                 "NL",
                 "password789"
         );
-        when(customerRepository.save(any(Customer.class))).thenReturn(savedCustomer);
+        when(customerRepository.saveAndFlush(any(Customer.class))).thenReturn(savedCustomer);
 
         Account savedAccount = new Account(
                 "NL91RABO0417164300",
@@ -228,4 +274,3 @@ class RegistrationServiceImplTest {
         ));
     }
 }
-

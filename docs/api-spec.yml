@@ -1,7 +1,9 @@
 openapi: 3.0.0
 info:
   title: Digital Onboarding Service API
-  description: Backend REST APIs that let customers register and open a bank account remotely, without visiting a branch.
+  description: |
+    Backend REST APIs that let customers register and open a bank account remotely, without visiting a branch.
+    Every response includes a server-generated X-Request-Id header for log correlation.
   version: 1.0.0
   contact:
     name: Random Bank Development Team
@@ -24,6 +26,7 @@ tags:
 paths:
   /register:
     post:
+      security: []
       tags:
         - Onboarding-Controller
       summary: Register a new customer
@@ -55,6 +58,9 @@ paths:
       responses:
         '201':
           description: Customer registered successfully
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -68,6 +74,9 @@ paths:
                     message: Registration successful
         '400':
           description: Validation failed (invalid age, country not allowed, malformed input)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -77,18 +86,21 @@ paths:
                   summary: Customer under 18
                   value:
                     code: VALIDATION_ERROR
-                    message: "Customer must be at least 18 years old"
-                    details: null
+                    message: Request validation failed
+                    details: "dateOfBirth: Customer must be at least 18 years old"
                     timestamp: 1758000000000
                 invalidCountry:
                   summary: Country not allowed
                   value:
                     code: VALIDATION_ERROR
-                    message: "Country code 'US' is not allowed. Allowed countries: NL, BE"
-                    details: null
+                    message: Request validation failed
+                    details: "countryCode: Country is not allowed for registration"
                     timestamp: 1758000000000
         '409':
           description: Username already exists
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -100,6 +112,7 @@ paths:
                 timestamp: 1758000000000
   /login:
     post:
+      security: []
       tags:
         - Onboarding-Controller
       summary: Authenticate and obtain session token
@@ -123,6 +136,9 @@ paths:
       responses:
         '200':
           description: Login successful
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -133,6 +149,9 @@ paths:
                 message: Login successful
         '401':
           description: Invalid username or password
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -154,18 +173,12 @@ paths:
       operationId: getAccountOverview
       security:
         - BearerAuth: []
-      parameters:
-        - name: Authorization
-          in: header
-          description: Bearer token obtained from /login
-          required: true
-          schema:
-            type: string
-            pattern: "^Bearer [a-f0-9-]{36}$"
-          example: "Bearer 5f8a3c21-9b4e-4d17-8c33-1e6a7b2d9f04"
       responses:
         '200':
           description: Account overview retrieved successfully
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -177,6 +190,9 @@ paths:
                 currency: EUR
         '401':
           description: Missing or invalid authorization token
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -198,6 +214,9 @@ paths:
                     timestamp: 1758000000000
         '404':
           description: Account not found for the authenticated user
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -209,12 +228,18 @@ paths:
                 timestamp: 1758000000000
 
 components:
+  headers:
+    RequestId:
+      description: Server-generated identifier for correlating this request with service logs.
+      schema:
+        type: string
+        format: uuid
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: UUID
-      description: JWT-style Bearer token obtained from the /login endpoint
+      description: Opaque session token obtained from the /login endpoint
 
   schemas:
     RegisterRequest:
@@ -230,21 +255,21 @@ components:
           type: string
           description: Full name of the customer
           example: John Doe
-          minLength: 1
-          maxLength: 255
+          minLength: 2
+          maxLength: 100
         address:
           type: string
           description: Residential address
           example: Damrak 1, Amsterdam
-          minLength: 1
-          maxLength: 255
+          minLength: 5
+          maxLength: 200
         username:
           type: string
           description: Unique username for login
           example: john_doe
           minLength: 3
           maxLength: 50
-          pattern: "^[a-zA-Z0-9_-]+$"
+          pattern: "^[a-zA-Z0-9._-]+$"
         dateOfBirth:
           type: string
           format: date
@@ -254,6 +279,9 @@ components:
           type: string
           description: ISO 3166-1 alpha-2 country code
           example: NL
+          minLength: 2
+          maxLength: 2
+          pattern: "^[A-Z]{2}$"
           enum:
             - NL
             - BE
@@ -288,6 +316,8 @@ components:
           type: string
           description: Username
           example: john_doe
+          minLength: 3
+          maxLength: 50
         password:
           type: string
           description: Password
@@ -325,7 +355,7 @@ components:
       properties:
         accountNumber:
           type: string
-          description: Full IBAN (Dutch format for NL customers)
+          description: Checksum-valid Dutch-format demo IBAN; fixed RABO code is not a bank-issued account.
           example: NL91RABO0417164300
           pattern: "^NL\\d{2}[A-Z]{4}\\d{10}$"
         accountType:
@@ -364,13 +394,14 @@ components:
             - UNAUTHORIZED
             - CONFLICT
             - NOT_FOUND
+            - BAD_REQUEST
             - INTERNAL_ERROR
         message:
           type: string
           description: Human-readable error message
           example: "Username already exists"
         details:
-          type: object
+          type: string
           nullable: true
           description: Additional error details (may be null)
           example: null
@@ -379,4 +410,3 @@ components:
           format: int64
           description: Unix timestamp (milliseconds) when the error occurred
           example: 1758000000000
-

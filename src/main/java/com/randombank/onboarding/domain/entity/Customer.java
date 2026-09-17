@@ -8,6 +8,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -16,7 +17,8 @@ import lombok.Setter;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "customers")
+@Table(name = "customers", uniqueConstraints =
+        @UniqueConstraint(name = "uk_customers_username", columnNames = "username"))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Customer {
@@ -31,7 +33,7 @@ public class Customer {
     @Column(nullable = false)
     private String address;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String username;
 
     @Column(nullable = false)

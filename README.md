@@ -22,6 +22,11 @@ Built with Java 21, Spring Boot 4.0.6, Spring Data JPA and H2.
 | 18+ only | `@MinimumAge(18)` |
 | Protect the legacy database (maximum 2 operations/second) | `DatabaseAccessInterceptor` + `DatabaseOperationRateLimiter` |
 
+Each HTTP response also includes a server-generated `X-Request-Id`. Use it to find the
+matching request-completion and application log entries. Generated IBANs follow Dutch
+format and MOD-97 checksums, using a fixed demo bank code; they are not bank-issued
+accounts.
+
 ---
 
 ## Running Locally
@@ -212,7 +217,8 @@ load: a normal registration takes roughly 1.5 seconds at the default rate.
 
 The rate is configurable through `app.db.max-operations-per-second`. Unit tests use a
 controllable monotonic clock, and `DatabaseThrottleIntegrationTest` verifies that the AOP
-advice is applied to real Spring Data repository proxies.
+advice is applied to real Spring Data repository proxies. This limits repository-operation
+starts, not incoming HTTP requests; a single API request may perform multiple operations.
 
 ### Why there is no response cache
 
@@ -233,7 +239,7 @@ requests present it as `Authorization: Bearer <token>`.
 
 The deliberate property here is that token verification performs **no database access** —
 it is a single in-memory map lookup. This keeps per-request load off the legacy database,
-which matters directly given the 2 req/sec ceiling.
+which matters directly given the two repository-operations-per-second ceiling.
 
 Login returns the same `UnauthorizedException` message for an unknown username and for a
 wrong password, so the API does not leak which usernames exist.
@@ -275,8 +281,9 @@ country reports "Country code is required" rather than "Country is not allowed".
 `IbanGenerator` produces a structurally valid Dutch IBAN including correctly computed
 MOD-97 check digits, rather than a random string. `IbanGeneratorTest` independently
 verifies the checksum across repeated runs. Generation retries when a pre-insert check
-finds an existing IBAN. The unique index prevents duplicates, but concurrent collisions
-still need transaction-level retry handling.
+finds an existing IBAN. The fixed RABO bank code is for demonstration only: generated
+values are not accounts issued by a real bank. The unique index prevents duplicates,
+but a concurrent IBAN collision still needs transaction-level retry handling.
 
 ---
 
@@ -303,10 +310,9 @@ The following gaps remain open; documenting them does not resolve them.
 | Area | Problem and proposed solution |
 |---|---|
 | Distributed database throughput | Replace the per-instance limiter with a shared budget when scaling to multiple application instances. |
-| Concurrent registration | Simultaneous requests can pass uniqueness checks and return 500. Map username constraint violations to 409 and retry IBAN collisions in a fresh transaction. |
-| Additional resilience tests | Add sustained-load, queue-timeout, rollback, Belgium, and exact-age-18 coverage. |
+| Concurrent IBAN generation | Simultaneous generated IBAN collisions can still fail at the unique database constraint; retry account creation in a fresh transaction. Concurrent username conflicts are translated to 409. |
+| Additional resilience tests | Add sustained-load, queue-timeout, and transaction rollback coverage. |
 | API contract | Keep authentication, validation limits, and error schemas aligned between the static and generated OpenAPI specifications. |
-| Error privacy | Unexpected errors expose internal exception messages. Log details server-side and return a generic message to clients. |
 | Documentation and delivery | Align the Postman pacing scenarios and architecture document with the blocking database-operation throttle. |
 
 ---
